@@ -17,4 +17,11 @@
     <!-- v4.0 needs admin for thread-priority / affinity on other processes (same as the WinForms build). -->
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- out-of-BCL on net8: WMI (Fingerprint/GrobLic/SysInfo) and ServiceController (Cleaner). Registry, crypto
+         and BigInteger are built into net8.0-windows and need no package. -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+  </ItemGroup>
+
 </Project>
