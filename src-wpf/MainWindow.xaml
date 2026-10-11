@@ -75,7 +75,7 @@
 
         <!-- Content -->
         <Grid Grid.Column="1">
-            <TextBlock x:Name="Content" Text="grobyq v4.0 — WPF shell"
+            <TextBlock x:Name="ContentText" Text="grobyq v4.0 — WPF shell"
                        Foreground="{StaticResource Dim}" FontSize="16"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Grid>

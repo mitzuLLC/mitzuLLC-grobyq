@@ -47,7 +47,7 @@ namespace Grobyq
             if (dev == null) return f;
             f.Cfg = Devices.ReadIrq(dev.InstanceId);
             f.AllocState = Devices.IrqAlloc(dev.DevInst, out f.Msi, out f.Lines);
-            f.Topo = ThreadsPage.SafeTopo();
+            try { f.Topo = Topo.Live(); } catch { f.Topo = null; }   // was ThreadsPage.SafeTopo() (UI); engine reads topology directly
             try { if (f.Topo != null) f.Game = GameMask.Info(f.Topo); } catch { }
             f.Reserved = Reservation.Reserved();
             f.POnly = Settings.Get("IrqPOnly") != "0";

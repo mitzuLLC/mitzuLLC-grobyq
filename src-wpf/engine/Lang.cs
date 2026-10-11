@@ -97,18 +97,15 @@ namespace Grobyq
         // Share of UI strings this language covers (Settings shows it).
         public static int Coverage { get { return _map.Count; } }
 
-        // The UI font family for the current language, verified to be installed.
+        // The preferred UI font family name for the current language. WPF resolves it by name and falls back
+        // automatically if it is not installed, so no System.Drawing font probing is needed here.
         public static string Family
         {
             get
             {
                 if (_family != null) return _family;
-                foreach (var f in Cur.Fonts)
-                {
-                    try { using (var ff = new FontFamily(f)) { if (string.Equals(ff.Name, f, StringComparison.OrdinalIgnoreCase)) { _family = f; return f; } } }
-                    catch { }
-                }
-                _family = FontFamily.GenericSansSerif.Name;
+                foreach (var f in Cur.Fonts) { if (!string.IsNullOrEmpty(f)) { _family = f; return f; } }
+                _family = "Segoe UI";
                 return _family;
             }
         }

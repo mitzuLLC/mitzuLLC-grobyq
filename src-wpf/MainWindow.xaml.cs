@@ -14,7 +14,7 @@ namespace Grobyq
         private void Nav(object sender, RoutedEventArgs e)
         {
             var tag = (sender as Button)?.Tag as string ?? "";
-            Content.Text = "grobyq v4.0 — " + tag;
+            ContentText.Text = "grobyq v4.0 — " + tag;
         }
     }
 }
