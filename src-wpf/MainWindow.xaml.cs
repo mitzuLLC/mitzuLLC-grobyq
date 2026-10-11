@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Grobyq.Pages;
 
@@ -44,6 +46,26 @@ namespace Grobyq
                 var t = Topo.Live();
                 AppLog.Add(string.Format("CPU: {0} LP / {1} cores, SMT={2}", t.LogicalCount, t.PhysicalCount, t.SMT));
                 if (t.Hybrid) AppLog.Add("[i] Hybrid CPU: только P-ядра для Ideal Processor и SmtOff*.");
+            }
+            catch { }
+        }
+
+        // Dark / app-tinted window title bar (Win10 2004+ / Win11), so the top caption matches the app, not white.
+        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;     // 19 on early builds
+        private const int DWMWA_CAPTION_COLOR = 35;               // Win11: exact caption color (0x00BBGGRR)
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                int on = 1;
+                if (DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref on, sizeof(int)) != 0)
+                    DwmSetWindowAttribute(hwnd, 19, ref on, sizeof(int));
+                int caption = 0x00060606;   // #060606 as 0x00BBGGRR
+                DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
             }
             catch { }
         }
