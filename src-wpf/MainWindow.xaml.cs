@@ -25,12 +25,26 @@ namespace Grobyq
                 { "threads",  () => new PlaceholderPage("Threads") },
                 { "affinity", () => new PlaceholderPage("Affinity") },
                 { "clean",    () => new PlaceholderPage("System cleanup") },
-                { "log",      () => new PlaceholderPage("Log") },
+                { "log",      () => new JournalPage() },
                 { "settings", () => new PlaceholderPage("Settings") },
                 { "about",    () => new PlaceholderPage("About") },
             };
 
+            SeedLog();
             Navigate("home");
+        }
+
+        private void SeedLog()
+        {
+            AppLog.Add(Brand.Name + " " + Brand.Version + "   ·   " + Brand.XUrl);
+            AppLog.Add("[i] THREADS оптимизирует игру. AFFINITY закрепляет ядра и прерывания.");
+            try
+            {
+                var t = Topo.Live();
+                AppLog.Add(string.Format("CPU: {0} LP / {1} cores, SMT={2}", t.LogicalCount, t.PhysicalCount, t.SMT));
+                if (t.Hybrid) AppLog.Add("[i] Hybrid CPU: только P-ядра для Ideal Processor и SmtOff*.");
+            }
+            catch { }
         }
 
         private void Nav(object sender, RoutedEventArgs e)
