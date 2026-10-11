@@ -113,7 +113,7 @@ jobs:
             Write-Host "---- selftest $dir (exit $($p.ExitCode)) ----"
             if (Test-Path $log) {
               Get-Content $log | ForEach-Object { Write-Host $_ }
-              Get-Content $log | Where-Object { $_ -like 'FAIL*' -or $_ -like 'PASS*' } | Select-Object -First 6 | ForEach-Object { Write-Host "::notice::selftest $dir : $_" }
+              Get-Content $log | Where-Object { $_ -like 'FAIL*' -or $_ -like 'PASS*' -or $_ -like '*jit*' } | Select-Object -First 8 | ForEach-Object { Write-Host "::notice::selftest $dir : $_" }
             } else { Write-Host "::warning::selftest $dir wrote no log (exit $($p.ExitCode))" }
             return [int]$p.ExitCode
           }

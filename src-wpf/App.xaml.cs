@@ -134,6 +134,36 @@ namespace Grobyq
                 var pages = new System.Windows.Controls.UserControl[] { new Pages.HomePage(), new Pages.ThreadsPage(), new Pages.AffinityPage(), new Pages.CleanupPage(), new Pages.SettingsPage(), new Pages.AboutPage(), new Pages.JournalPage() };
                 return pages.Length == 7;
             });
+            // JIT every method of the assembly: an obfuscation layer that emits invalid IL fails here, at build time,
+            // instead of in a code path the checks above never reach (InvalidProgramException on first call).
+            chk("jit", () =>
+            {
+                int n = 0, bad = 0;
+                const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly;
+                foreach (var type in typeof(App).Assembly.GetTypes())
+                {
+                    if (type.ContainsGenericParameters) continue;
+                    var methods = new System.Collections.Generic.List<System.Reflection.MethodBase>();
+                    methods.AddRange(type.GetMethods(all));
+                    methods.AddRange(type.GetConstructors(all));
+                    foreach (var m in methods)
+                    {
+                        if (m.IsAbstract || m.ContainsGenericParameters) continue;
+                        if ((m.Attributes & System.Reflection.MethodAttributes.PinvokeImpl) != 0) continue;
+                        var impl = m.MethodImplementationFlags;
+                        if ((impl & System.Reflection.MethodImplAttributes.Runtime) != 0 || (impl & System.Reflection.MethodImplAttributes.InternalCall) != 0) continue;
+                        try { System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(m.MethodHandle); n++; }
+                        catch (Exception ex)
+                        {
+                            bad++;
+                            if (bad <= 5) log.Add("      jit " + type.FullName + "." + m.Name + ": " + ex.GetType().Name + ": " + ex.Message);
+                        }
+                    }
+                }
+                log.Add("      jit: " + n + " methods compiled, " + bad + " failed");
+                return bad == 0;
+            });
             log.Add(fails == 0 ? "PASS" : "FAILED: " + fails);
             try { File.WriteAllLines(Path.Combine(Path.GetTempPath(), "grobyq-selftest.txt"), log); } catch { }
             return fails == 0 ? 0 : 3;
