@@ -4,6 +4,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- WinForms only for the tray icon (NotifyIcon + its menu). WPF has no tray control of its own. Implicit usings are
+         off, so no WinForms namespace leaks into the WPF code: Ui/Tray.cs references it fully qualified. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>grobyq</AssemblyName>
     <RootNamespace>Grobyq</RootNamespace>
     <Nullable>disable</Nullable>
@@ -14,6 +17,7 @@
     <Product>grobyq by mitzu LLC</Product>
     <Company>mitzu LLC</Company>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- v4.0 needs admin for thread-priority / affinity on other processes (same as the WinForms build). -->
   </PropertyGroup>
 
@@ -27,6 +31,9 @@
   <ItemGroup>
     <!-- logo / icon assets, referenced by pack URI (/Assets/..) -->
     <Resource Include="Assets\*.png" />
+    <!-- interface languages: English is the key, these map English -> translation (L.Load reads lang.<code>.json) -->
+    <EmbeddedResource Include="Lang\ru.json" LogicalName="lang.ru.json" />
+    <EmbeddedResource Include="Lang\uk.json" LogicalName="lang.uk.json" />
   </ItemGroup>
 
 </Project>

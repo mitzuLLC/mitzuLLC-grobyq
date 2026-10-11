@@ -18,6 +18,9 @@ public static class GrobLic
     // ------------------------------------------------------------------
     private static string _hwid;
 
+    // The HWID once computed (WMI is slow on the first call); null until then. The UI reads this, a worker computes.
+    public static string HwidIfReady { get { return _hwid; } }
+
     public static string Hwid()
     {
         if (_hwid != null) return _hwid;

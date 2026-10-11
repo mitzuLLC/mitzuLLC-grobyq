@@ -32,6 +32,8 @@ namespace Grobyq
         public bool BgAffinity = true;
         public bool BgForeground = true;
         public bool DoAffRules = true;
+        public bool DoProcess = true;           // game process: class / I/O / memory priority / EcoQoS / boost
+        public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
     }
 
     public sealed class Engine
@@ -506,23 +508,35 @@ namespace Grobyq
                     Debug.Assert(_procBefore[p.Id].Have, "process baseline must be captured before any set");
 
                     var pb = _procBefore[p.Id];
-                    pb.Class = pb.IoSet = pb.MemSet = pb.AffSet = pb.SetsSet = true;
-                    bool okPrio = Native.SetPriorityClass(hp, PRIO[cls]);
-                    int stIo = Native.SetProcIo(hp, IOP[io]);
-                    bool okMem = Native.SetMemPrio(hp, MEM[mem], false);
-                    bool okEco = true;
-                    if (ecoOff) { pb.Eco = true; okEco = Native.SetPowerThrottling(hp, false); }
-                    if (string.Equals(pboost, "Off", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, true); }
-                    else if (string.Equals(pboost, "On", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, false); }
+                    // v4 manual mode: only the parts the user switched on are written (and only those get restored).
+                    //   DoProcess = class / I/O / memory priority / EcoQoS off / process boost (preset)
+                    //   DoMask    = process affinity + default CPU sets (the game core mask)
+                    bool okPrio = true, okMem = true, okEco = true, okAff = true, okSets = true;
+                    int stIo = 0;
+                    if (o.DoProcess)
+                    {
+                        pb.Class = pb.IoSet = pb.MemSet = true;
+                        okPrio = Native.SetPriorityClass(hp, PRIO[cls]);
+                        stIo = Native.SetProcIo(hp, IOP[io]);
+                        okMem = Native.SetMemPrio(hp, MEM[mem], false);
+                        if (ecoOff) { pb.Eco = true; okEco = Native.SetPowerThrottling(hp, false); }
+                        if (string.Equals(pboost, "Off", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, true); }
+                        else if (string.Equals(pboost, "On", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, false); }
+                    }
                     uint rbClass = Native.GetPriorityClass(hp);
-                    bool okAff = Native.SetProcAffinity(hp, mask.Mask);
-                    bool okSets = Native.SetProcessDefaultCpuSets(hp, mask.SetIds, (uint)mask.SetIds.Length);
+                    if (o.DoMask)
+                    {
+                        pb.AffSet = pb.SetsSet = true;
+                        okAff = Native.SetProcAffinity(hp, mask.Mask);
+                        okSets = Native.SetProcessDefaultCpuSets(hp, mask.SetIds, (uint)mask.SetIds.Length);
+                    }
                     ulong eff = Native.GetProcAffinity(hp);
 
                     _appliedGame.Add(p.Id);
                     string rbName; PRIONAME.TryGetValue((int)rbClass, out rbName);
-                    log.Add(string.Format("[OK] {0} PID {1} L{2} class={3} (read-back {4}) io={5} mem={6} mask=0x{7:X} LP {8}",
-                        target, p.Id, lvl, cls, rbName ?? "?", io, mem, eff, Masks.MaskLps(eff)));
+                    log.Add(string.Format("[OK] {0} PID {1} L{2} class={3} (read-back {4}) io={5} mem={6} mask=0x{7:X} LP {8}{9}",
+                        target, p.Id, lvl, o.DoProcess ? cls : "keep", rbName ?? "?", o.DoProcess ? io : "keep", o.DoProcess ? mem : "keep",
+                        eff, Masks.MaskLps(eff), o.DoMask ? "" : " (mask not set)"));
                     if (!okPrio) { log.Add("     ! SetPriorityClass failed"); report.Failures.Add("SetPriorityClass"); }
                     if (!okAff)  { log.Add("     ! SetProcessAffinityMask failed"); report.Failures.Add("SetProcessAffinityMask"); }
                     if (!okSets) { log.Add("     ! SetProcessDefaultCpuSets failed"); report.Failures.Add("SetProcessDefaultCpuSets"); }

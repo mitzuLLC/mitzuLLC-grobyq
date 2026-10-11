@@ -10,7 +10,10 @@ namespace Grobyq
 {
     // Drives the engine: enable/disable state, the 1s watch tick (target detect, periodic re-apply off the UI thread,
     // background foreground apply) and revert on disable. Ported from the WinForms MainForm loop with the UI stripped:
-    // results go to AppLog, and StateChanged fires so the Threads page can read StateName / LiveTarget.
+    // results go to AppLog, and StateChanged fires so the pages can read StateName / LiveTarget.
+    //
+    // v4 manual mode: nothing arms by itself unless "Enable at start" is on, and an apply writes only the parts the user
+    // switched on and saved (process priority, core mask, threads, background, rules). DISABLE restores every baseline.
     public sealed class Optimizer
     {
         public static Optimizer Instance { get; private set; }
@@ -30,10 +33,15 @@ namespace Grobyq
         public string LiveTarget => _liveTarget;
         public string StateName => _active ? (string.IsNullOrEmpty(_liveTarget) ? "ARMED" : "ACTIVE") : "OFF";
 
+        // The optimization parts a user can switch on (Settings keys). None on = ENABLE would change nothing.
+        public static readonly string[] Parts = { "DoProcess", "DoMask", "DoThreads", "DoBackground", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt" };
+        public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
+
         public Optimizer()
         {
             Instance = this;
             Eng = new Engine(Settings.WatchList());
+            if (Eng.Targets == null || Eng.Targets.Length == 0) Eng.Targets = new[] { "cs2.exe" };
             Eng.AffRules = Settings.LoadAffRules();
             Eng.LoadSystemProfile(Settings.GetBool("SystemThreadOpt"));
             try { var m = Store.Migrate362(Eng); if (m != null && m.Count > 0) AppLog.Add(m); } catch { }
@@ -44,6 +52,8 @@ namespace Grobyq
 
             if (Settings.GetBool("AutoEnable")) SetActive(true);
         }
+
+        public void Stop() { try { _timer.Stop(); } catch { } }
 
         private Topo SafeTopo()
         {
@@ -56,7 +66,12 @@ namespace Grobyq
         {
             if (on == _active) return;
             _active = on;
-            if (on) { AppLog.Add("=== ENABLED ==="); ApplyNow(); }
+            if (on)
+            {
+                AppLog.Add("=== ENABLED ===");
+                if (!AnyPartOn) AppLog.Add("[i] nothing is switched on to optimize: pick the parts on Threads, Save, then ENABLE");
+                ApplyNow();
+            }
             else
             {
                 AppLog.Add("=== DISABLED ===");
@@ -66,12 +81,27 @@ namespace Grobyq
             StateChanged?.Invoke();
         }
 
+        // After Save: the new choice replaces the old one completely. Active = restore every baseline, then apply the
+        // saved parts from scratch (a part switched off is undone, not just left alone). Off = nothing is touched.
+        public void Reapply()
+        {
+            Eng.Targets = Settings.WatchList();
+            if (Eng.Targets.Length == 0) Eng.Targets = new[] { "cs2.exe" };
+            try { Eng.LoadSystemProfile(Settings.GetBool("SystemThreadOpt")); } catch { }
+            if (!_active) { StateChanged?.Invoke(); return; }
+            try { AppLog.Add(Eng.Revert()); } catch (Exception ex) { AppLog.Add("[!!] " + ex.Message); }
+            _liveTarget = "";
+            ApplyNow();
+        }
+
         public ApplyOptions Opts() => new ApplyOptions
         {
             MaskName = GameRule(),
             BgMaskName = GameMask.ManualRule(SafeTopo()),
             TopN = Math.Max(1, Math.Min(32, Settings.GetInt("TopN", 4))),
             SkipCpu0 = Settings.GetBool("SkipCpu0"),
+            DoProcess = Settings.GetBool("DoProcess"),
+            DoMask = Settings.GetBool("DoMask"),
             DoThreads = Settings.GetBool("DoThreads"),
             DoBackground = Settings.GetBool("DoBackground"),
             BgAffinity = Settings.GetBool("BgAffinity"),
@@ -109,7 +139,7 @@ namespace Grobyq
                         else
                         {
                             if (log != null) AppLog.Add(log);
-                            _liveTarget = live;
+                            if (_active) _liveTarget = live;
                             if (reps != null) foreach (var rep in reps) AppLog.Add(RepLine(rep));
                             StateChanged?.Invoke();
                         }
@@ -183,7 +213,13 @@ namespace Grobyq
 
         public static int ByNameCount(string exe)
         {
-            try { return Process.GetProcessesByName(exe.ToLowerInvariant().EndsWith(".exe") ? exe.Substring(0, exe.Length - 4) : exe).Length; }
+            try
+            {
+                var a = Process.GetProcessesByName(exe.ToLowerInvariant().EndsWith(".exe") ? exe.Substring(0, exe.Length - 4) : exe);
+                int n = a.Length;
+                foreach (var p in a) { try { p.Dispose(); } catch { } }
+                return n;
+            }
             catch { return 0; }
         }
     }

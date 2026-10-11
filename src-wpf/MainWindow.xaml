@@ -1,84 +1,20 @@
 <Window x:Class="Grobyq.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="grobyq" Height="640" Width="1000"
+        Title="grobyq" Width="1340" Height="880" MinWidth="1000" MinHeight="600"
         WindowStartupLocation="CenterScreen"
-        Icon="/Assets/ico_32.png"
         Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
-        FontFamily="Segoe UI" FontSize="13">
-
-    <Window.Resources>
-        <!-- Sidebar nav button: flat, highlights on hover/selected -->
-        <Style x:Key="NavButton" TargetType="Button">
-            <Setter Property="Height" Value="38" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-            <Setter Property="Padding" Value="18,0,0,0" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource Dim}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="#1C2024" />
-                                <Setter Property="Foreground" Value="{StaticResource Fg}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="NavHeader" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#6B7177" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Margin" Value="18,16,0,4" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-    </Window.Resources>
-
+        FontFamily="Segoe UI" FontSize="12.67"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display">
+    <!-- The shell of the WinForms build: a 262 px sidebar (logo + name, nav, Settings / About pinned at the bottom) and
+         the page host. The sidebar is built in code (MainWindow.BuildSidebar) so a language switch can rebuild it. -->
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="248" />
+            <ColumnDefinition Width="262" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
-
-        <!-- Sidebar -->
-        <Border Grid.Column="0" Background="{StaticResource Side}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
-            <DockPanel>
-                <Border DockPanel.Dock="Top" Height="66">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
-                        <Image Source="/Assets/glyph_96.png" Height="28" Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" />
-                        <TextBlock Text="grobyq" FontSize="20" FontWeight="SemiBold"
-                                   Foreground="{StaticResource Fg}" VerticalAlignment="Center" Margin="11,0,0,0" />
-                    </StackPanel>
-                </Border>
-
-                <!-- footer pinned bottom -->
-                <StackPanel x:Name="NavFoot" DockPanel.Dock="Bottom" Margin="0,0,0,10">
-                    <Border Height="1" Background="{StaticResource Line}" Margin="0,6" />
-                    <Button Content="Settings" Style="{StaticResource NavButton}" Click="Nav" Tag="settings" />
-                    <Button Content="About"    Style="{StaticResource NavButton}" Click="Nav" Tag="about" />
-                </StackPanel>
-
-                <StackPanel x:Name="NavTop">
-                    <Button Content="Home" Style="{StaticResource NavButton}" Click="Nav" Tag="home" />
-                    <TextBlock Text="SYSTEM CONFIGURATION" Style="{StaticResource NavHeader}" />
-                    <Button Content="Threads"  Style="{StaticResource NavButton}" Click="Nav" Tag="threads" />
-                    <Button Content="Affinity" Style="{StaticResource NavButton}" Click="Nav" Tag="affinity" />
-                    <TextBlock Text="MAINTENANCE" Style="{StaticResource NavHeader}" />
-                    <Button Content="System cleanup" Style="{StaticResource NavButton}" Click="Nav" Tag="clean" />
-                    <Button Content="Log"            Style="{StaticResource NavButton}" Click="Nav" Tag="log" />
-                </StackPanel>
-            </DockPanel>
-        </Border>
-
-        <!-- Content: the active page is swapped in here -->
-        <ContentControl x:Name="PageHost" Grid.Column="1" />
+        <Border x:Name="SideHost" Grid.Column="0" Background="{StaticResource Side}" />
+        <ContentControl x:Name="PageHost" Grid.Column="1" Focusable="False" />
     </Grid>
 </Window>

@@ -108,13 +108,18 @@ namespace Grobyq
                 { "BgAffinity", "1" },
                 { "BgForeground", "1" },
                 { "BgProcs", DefaultBgProcs },
-                { "AutoEnable", "1" },
+                // v4 manual mode: a first run changes NOTHING. The optimizer does not arm at start and every optimization
+                // switch starts off; the user picks what to apply, presses Save, then ENABLE. Mechanism settings (period,
+                // hot thread count, CPU 0 avoidance, alt-tab release) keep their defaults: they only act on a chosen part.
+                { "AutoEnable", "0" },
                 { "CloseToTray", "1" },
                 { "PeriodicReapply", "1" },
-                { "DoThreads", "1" },
-                { "DoBackground", "1" },
-                { "DoAffRules", "1" },
-                { "ApplyAllPresets", "1" },       // thread-priority presets on programs / services (non-targets)
+                { "DoProcess", "0" },             // game process priority (class / I/O / memory / EcoQoS)
+                { "DoMask", "0" },                // game core mask (affinity + CPU sets)
+                { "DoThreads", "0" },
+                { "DoBackground", "0" },
+                { "DoAffRules", "0" },
+                { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
                 { "AllowProtectedPriority", "0" }, // Advanced: priority on protected system processes (off by default)
                 { "RestoreOnExit", "1" },
