@@ -61,8 +61,10 @@ jobs:
           if (Test-Path tests) { dotnet test -c Release } else { Write-Host "no tests project yet — skipping" }
 
       # ---- 3. obfuscate (ConfuserEx2) ----
-      # continue-on-error during bring-up: ConfuserEx2 + WPF needs tuning (anti-tamper can break BAML). The package
-      # step falls back to the un-obfuscated publish if 'protected' isn't produced, so build->package still completes.
+      # .NET 8: grobyq.exe is the native apphost, the managed code is grobyq.dll - that is what gets protected. The
+      # crproj template gets the runner's .NET 8 shared framework folders as probe paths. Output: obf\grobyq.dll, then
+      # protected\ = publish\ with the protected dll. continue-on-error: a failed obfuscation never blocks a build;
+      # the smoke test below decides which build ships.
       - name: Obfuscate (ConfuserEx2)
         continue-on-error: true
         shell: pwsh
@@ -70,12 +72,50 @@ jobs:
           $url = "https://github.com/mkaring/ConfuserEx/releases/download/v$env:CONFUSER_VERSION/ConfuserEx-CLI.zip"
           Invoke-WebRequest $url -OutFile confuser.zip
           Expand-Archive confuser.zip -DestinationPath confuser -Force
-          # Confuser.crproj points at .\publish and writes to .\protected
-          & .\confuser\Confuser.CLI.exe -n .\build\Confuser.crproj
-          if (-not (Test-Path protected/grobyq.exe)) { throw "obfuscation produced no grobyq.exe" }
+          $root = Split-Path (Get-Command dotnet).Source
+          function Latest($name) {
+            Get-ChildItem (Join-Path $root "shared\$name") -Directory | Where-Object { $_.Name -like '8.0.*' } |
+              Sort-Object { [version]$_.Name } | Select-Object -Last 1 -ExpandProperty FullName
+          }
+          $core = Latest 'Microsoft.NETCore.App'; $desk = Latest 'Microsoft.WindowsDesktop.App'
+          Write-Host "probe paths: $core | $desk"
+          (Get-Content build\Confuser.crproj -Raw).Replace('@@NETCORE@@', $core).Replace('@@DESKTOP@@', $desk) |
+            Set-Content build\Confuser.gen.crproj -Encoding utf8
+          & .\confuser\Confuser.CLI.exe -n .\build\Confuser.gen.crproj
+          if (-not (Test-Path obf\grobyq.dll)) { throw "obfuscation produced no grobyq.dll" }
+          Copy-Item publish protected -Recurse -Force
+          Copy-Item obf\grobyq.dll protected\grobyq.dll -Force
 
-      # ---- 4. sign the obfuscated exe (only when the cert secret is configured; build still runs without it) ----
-      - name: Sign exe (Authenticode)
+      # ---- 3b. smoke test: grobyq.exe /selftest (headless: resources, languages, topology, presets, every page) ----
+      # The protected build ships only if the unprotected one passes AND it passes too; otherwise the unprotected build
+      # is packaged and a warning says why (bring-up: a selftest failure never blocks the artifact).
+      - name: Smoke test (selftest)
+        shell: pwsh
+        run: |
+          function Smoke($dir) {
+            $exe = Join-Path $dir 'grobyq.exe'
+            if (-not (Test-Path $exe)) { return 99 }
+            $log = Join-Path $env:TEMP 'grobyq-selftest.txt'
+            Remove-Item $log -ErrorAction SilentlyContinue
+            $p = Start-Process -FilePath (Resolve-Path $exe) -ArgumentList '/selftest' -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(180000)) { $p.Kill(); Write-Host "selftest timed out in $dir"; return 98 }
+            Write-Host "---- selftest $dir (exit $($p.ExitCode)) ----"
+            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } } else { Write-Host "(no selftest log)" }
+            return [int]$p.ExitCode
+          }
+          $plain = Smoke 'publish'
+          $src = 'publish'
+          if ($plain -ne 0) { Write-Host "::warning::the unprotected build fails its selftest ($plain) - packaging it unprotected, check the log above" }
+          elseif (Test-Path protected\grobyq.dll) {
+            $prot = Smoke 'protected'
+            if ($prot -eq 0) { $src = 'protected'; Write-Host "protected build passed: packaging it" }
+            else { Write-Host "::warning::protected build failed its selftest ($prot) - packaging the unprotected build" }
+          } else { Write-Host "::warning::no protected build - packaging the unprotected build" }
+          "PKG_SRC=$src" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ---- 4. sign (only when the cert secret is configured; the build still runs without it) ----
+      - name: Sign exe + dll (Authenticode)
         if: env.HAS_CERT == 'true'
         shell: pwsh
         env:
@@ -85,7 +125,7 @@ jobs:
           [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:PFX_B64))
           $st = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
           & $st.FullName sign /f cert.pfx /p $env:PFX_PW /fd SHA256 `
-            /tr http://timestamp.digicert.com /td SHA256 protected/grobyq.exe
+            /tr http://timestamp.digicert.com /td SHA256 "$env:PKG_SRC/grobyq.exe" "$env:PKG_SRC/grobyq.dll"
 
       # ---- 5. package (Inno Setup) ----
       - name: Install Inno Setup
@@ -96,7 +136,7 @@ jobs:
         shell: pwsh
         run: |
           # absolute paths: Inno resolves relative SourceDir/OutputDir against the .iss folder (build\), not the repo root
-          $src = (Test-Path protected/grobyq.exe) ? "$PWD\protected" : "$PWD\publish"
+          $src = "$PWD\$env:PKG_SRC"
           $out = "$PWD\dist"
           & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DSrcDir=$src /DOutDir=$out build\grobyq.iss
           if (-not (Test-Path dist/grobyq-setup.exe)) { throw "installer not produced" }

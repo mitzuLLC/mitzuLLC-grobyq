@@ -21,7 +21,9 @@ namespace Grobyq
             base.OnStartup(e);
             try
             {
-                string action = ParseAction(e.Args);       // panel | tray
+                string action = ParseAction(e.Args);       // panel | tray | selftest
+
+                if (action == "selftest") { Shutdown(SelfTest()); return; }
 
                 Settings.MigrateOnce();
                 L.Load(Settings.Language());
@@ -97,9 +99,44 @@ namespace Grobyq
             foreach (var a in args ?? new string[0])
             {
                 string s = (a ?? "").TrimStart('/', '-').ToLowerInvariant();
-                if (s == "tray" || s == "panel") return s;
+                if (s == "tray" || s == "panel" || s == "selftest") return s;
             }
             return "panel";
+        }
+
+        // Headless smoke test (CI runs it on the protected build): the app resources, languages, topology, masks, presets
+        // and every page must load with the obfuscated IL. No window, no tray, no single-instance lock, nothing applied.
+        // Writes %TEMP%\grobyq-selftest.txt; exit code 0 = pass, 3 = a check failed.
+        private int SelfTest()
+        {
+            var log = new System.Collections.Generic.List<string> { Brand.Name + " " + Brand.Version + " selftest" };
+            int fails = 0;
+            Action<string, Func<bool>> chk = (name, f) =>
+            {
+                try { bool ok = f(); log.Add((ok ? "OK    " : "FAIL  ") + name); if (!ok) fails++; }
+                catch (Exception ex) { log.Add("FAIL  " + name + ": " + ex.GetType().Name + ": " + ex.Message); fails++; }
+            };
+            chk("resources", () => Resources["Acc"] is System.Windows.Media.Brush && Resources["BtnAccent"] is Style);
+            chk("settings", () => { Settings.MigrateOnce(); return Settings.Get("WatchList").Length > 0; });
+            chk("lang ru", () => { L.Load("ru"); return L.T("Settings") == "Настройки"; });
+            chk("lang uk", () => { L.Load("uk"); return L.T("Settings") == "Параметри"; });
+            chk("lang en", () => { L.Load("en"); return L.T("Settings") == "Settings"; });
+            chk("topology", () => Topo.Live().LogicalCount > 0);
+            chk("masks", () => { var t = Topo.Live(); return Masks.Options(t).Count > 0 && Masks.Build(t, Masks.Recommended(t)).Mask != 0; });
+            chk("game mask", () => GameMask.Info(Topo.Live(), false, null).Base != 0);
+            chk("presets", () => new Engine(new[] { "cs2.exe" }).Presets != null);
+            chk("cleaner", () => Cleaner.Items().Count > 0);
+            chk("hwid", () => GrobLic.Hwid().Length > 0);
+            chk("license url", () => Licensing.ListUrl.StartsWith("https://", StringComparison.Ordinal));
+            chk("pages", () =>
+            {
+                L.Load("ru");
+                var pages = new System.Windows.Controls.UserControl[] { new Pages.HomePage(), new Pages.ThreadsPage(), new Pages.AffinityPage(), new Pages.CleanupPage(), new Pages.SettingsPage(), new Pages.AboutPage(), new Pages.JournalPage() };
+                return pages.Length == 7;
+            });
+            log.Add(fails == 0 ? "PASS" : "FAILED: " + fails);
+            try { File.WriteAllLines(Path.Combine(Path.GetTempPath(), "grobyq-selftest.txt"), log); } catch { }
+            return fails == 0 ? 0 : 3;
         }
 
         // grobyq.settings.txt (next to the exe; grobPC.settings.txt is still read) can carry LICENSE_LIST_URL.
