@@ -69,9 +69,12 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           $url = "https://github.com/mkaring/ConfuserEx/releases/download/v$env:CONFUSER_VERSION/ConfuserEx-CLI.zip"
-          Invoke-WebRequest $url -OutFile confuser.zip
+          try { Invoke-WebRequest $url -OutFile confuser.zip -ErrorAction Stop } catch { Write-Host "::warning::ConfuserEx download failed: $($_.Exception.Message)"; throw }
           Expand-Archive confuser.zip -DestinationPath confuser -Force
+          $cli = Get-ChildItem confuser -Recurse -Filter Confuser.CLI.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $cli) { Write-Host "::warning::Confuser.CLI.exe not found in the zip: $((Get-ChildItem confuser -Recurse | Select-Object -First 15 -ExpandProperty Name) -join ', ')"; throw "no CLI" }
           $root = Split-Path (Get-Command dotnet).Source
           function Latest($name) {
             Get-ChildItem (Join-Path $root "shared\$name") -Directory | Where-Object { $_.Name -like '8.0.*' } |
@@ -81,8 +84,15 @@ jobs:
           Write-Host "probe paths: $core | $desk"
           (Get-Content build\Confuser.crproj -Raw).Replace('@@NETCORE@@', $core).Replace('@@DESKTOP@@', $desk) |
             Set-Content build\Confuser.gen.crproj -Encoding utf8
-          & .\confuser\Confuser.CLI.exe -n .\build\Confuser.gen.crproj
-          if (-not (Test-Path obf\grobyq.dll)) { throw "obfuscation produced no grobyq.dll" }
+          $out = & $cli -n .\build\Confuser.gen.crproj 2>&1 | Out-String
+          Write-Host $out
+          if (-not (Test-Path obf\grobyq.dll)) {
+            # surface the reason as annotations (the job log is not always at hand)
+            $lines = $out -split "`r?`n" | Where-Object { $_ -match 'ERROR|Exception|Failed|failed|cannot|Cannot|resolve' } | Select-Object -First 8
+            foreach ($l in $lines) { Write-Host "::warning::confuser: $($l.Trim())" }
+            throw "obfuscation produced no grobyq.dll"
+          }
+          Write-Host "::notice::ConfuserEx protected grobyq.dll ($((Get-Item obf\grobyq.dll).Length) bytes)"
           Copy-Item publish protected -Recurse -Force
           Copy-Item obf\grobyq.dll protected\grobyq.dll -Force
 
@@ -101,7 +111,10 @@ jobs:
             $null = $p.Handle
             if (-not $p.WaitForExit(180000)) { $p.Kill(); Write-Host "selftest timed out in $dir"; return 98 }
             Write-Host "---- selftest $dir (exit $($p.ExitCode)) ----"
-            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } } else { Write-Host "(no selftest log)" }
+            if (Test-Path $log) {
+              Get-Content $log | ForEach-Object { Write-Host $_ }
+              Get-Content $log | Where-Object { $_ -like 'FAIL*' -or $_ -like 'PASS*' } | Select-Object -First 6 | ForEach-Object { Write-Host "::notice::selftest $dir : $_" }
+            } else { Write-Host "::warning::selftest $dir wrote no log (exit $($p.ExitCode))" }
             return [int]$p.ExitCode
           }
           $plain = Smoke 'publish'
