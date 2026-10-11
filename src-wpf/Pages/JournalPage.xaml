@@ -4,54 +4,33 @@
              xmlns:local="clr-namespace:Grobyq">
     <UserControl.Resources>
         <local:LevelToBrush x:Key="LevelBrush" />
-        <Style x:Key="ToolBtn" TargetType="Button">
-            <Setter Property="Height" Value="26" />
-            <Setter Property="Padding" Value="12,0" />
-            <Setter Property="Margin" Value="4,0,0,0" />
-            <Setter Property="Foreground" Value="{StaticResource Dim}" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="#1C2024" />
-                                <Setter Property="Foreground" Value="{StaticResource Fg}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
     </UserControl.Resources>
 
-    <DockPanel Background="{StaticResource Bg}">
-        <Border DockPanel.Dock="Top" Background="{StaticResource Side}" Height="40"
+    <!-- The v3 log tab: a 30 px bar (caption + Hide / Clear / Copy), then the monospace log on #09090B.
+         English on purpose: it is A/B evidence and must read the same on every PC. -->
+    <DockPanel Background="{StaticResource LogBg}">
+        <Border DockPanel.Dock="Top" Background="{StaticResource Side}" Height="34"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
             <Grid>
-                <TextBlock Text="ЖУРНАЛ" Foreground="{StaticResource Dim}" FontWeight="SemiBold"
-                           FontSize="12" VerticalAlignment="Center" Margin="18,0,0,0" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0">
-                    <CheckBox x:Name="AutoScroll" Content="Автоскролл" IsChecked="True"
-                              Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <Button Content="Очистить"  Style="{StaticResource ToolBtn}" Click="OnClear" />
-                    <Button Content="Копировать" Style="{StaticResource ToolBtn}" Click="OnCopy" />
+                <TextBlock x:Name="Caption" Foreground="{StaticResource Dim}" FontWeight="SemiBold"
+                           FontSize="11.33" VerticalAlignment="Center" Margin="16,0,0,0" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <Button x:Name="CopyBtn"  Style="{StaticResource BtnGhost}" Height="26" MinWidth="60" Padding="10,0" Margin="4,0,0,0" Click="OnCopy" />
+                    <Button x:Name="ClearBtn" Style="{StaticResource BtnGhost}" Height="26" MinWidth="60" Padding="10,0" Margin="4,0,0,0" Click="OnClear" />
+                    <Button x:Name="HideBtn"  Style="{StaticResource BtnGhost}" Height="26" MinWidth="60" Padding="10,0" Margin="4,0,0,0" Click="OnHide" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <ListBox x:Name="List" Background="{StaticResource Bg}" BorderThickness="0"
+        <ListBox x:Name="List" Background="{StaticResource LogBg}" BorderThickness="0" Padding="0,8,0,8"
                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                 FontFamily="Cascadia Mono, Consolas, Courier New" FontSize="12.5">
+                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                 FontFamily="Consolas, Cascadia Mono, Courier New" FontSize="12">
             <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
                     <Setter Property="Background" Value="Transparent" />
                     <Setter Property="Padding" Value="0" />
+                    <Setter Property="Focusable" Value="False" />
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem"><ContentPresenter /></ControlTemplate>
@@ -61,9 +40,9 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <StackPanel Orientation="Horizontal" Margin="16,1,8,1">
-                        <TextBlock Text="{Binding Time}" Foreground="{StaticResource Dim}" Width="66" />
-                        <TextBlock Text="{Binding Tag}"  Width="94"
+                    <StackPanel Orientation="Horizontal" Margin="12,1,8,2">
+                        <TextBlock Text="{Binding Time}" Foreground="{StaticResource Faint}" Width="70" />
+                        <TextBlock Text="{Binding Tag}"  Width="70"
                                    Foreground="{Binding Level, Converter={StaticResource LevelBrush}}" />
                         <TextBlock Text="{Binding Text}"
                                    Foreground="{Binding Level, Converter={StaticResource LevelBrush}}" />

@@ -475,3 +475,79 @@ namespace Grobyq
         }
     }
 }
+
+namespace Grobyq
+{
+    // Vain-style checkable row (cleanup lists): bold title + grey description (+ amber warning) on the left, a value
+    // column (size / "found") and a big checkbox on the right. The whole row toggles; hover lights the row.
+    public sealed class CheckRow : System.Windows.Controls.Border
+    {
+        private bool _checked, _hot, _divider = true;
+        private readonly System.Windows.Controls.TextBlock _value;
+        private readonly System.Windows.Controls.Border _box, _line;
+        private readonly System.Windows.Shapes.Path _tick;
+        public event System.Action CheckedChanged;
+        public object Data;
+
+        public CheckRow(string title, string desc, string note = null, bool caution = false)
+        {
+            CornerRadius = new System.Windows.CornerRadius(8);
+            Cursor = System.Windows.Input.Cursors.Hand;
+            Background = System.Windows.Media.Brushes.Transparent;
+            var root = new System.Windows.Controls.Grid();
+            var g = new System.Windows.Controls.Grid { Margin = new System.Windows.Thickness(10, 8, 14, 8) };
+            g.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new System.Windows.GridLength(1, System.Windows.GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new System.Windows.GridLength(150) });
+            g.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = System.Windows.GridLength.Auto });
+            var text = new System.Windows.Controls.StackPanel { Margin = new System.Windows.Thickness(0, 0, 24, 0) };
+            text.Children.Add(Ui.Semi(title, 10, caution ? "Warn" : "Fg"));
+            if (!string.IsNullOrEmpty(desc)) { var d = Ui.Text(desc, 8.75, "Dim"); d.Margin = new System.Windows.Thickness(0, 1, 0, 0); text.Children.Add(d); }
+            if (!string.IsNullOrEmpty(note)) { var n = Ui.Text("⚠ " + note, 8.75, "Warn"); n.Margin = new System.Windows.Thickness(0, 2, 0, 0); text.Children.Add(n); }
+            g.Children.Add(text);
+            _value = Ui.Text("", 9.5, "Fg", false);
+            _value.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
+            _value.VerticalAlignment = System.Windows.VerticalAlignment.Center;
+            _value.Margin = new System.Windows.Thickness(0, 0, 12, 0);
+            System.Windows.Controls.Grid.SetColumn(_value, 1);
+            g.Children.Add(_value);
+            _box = new System.Windows.Controls.Border { Width = 20, Height = 20, CornerRadius = new System.Windows.CornerRadius(5), BorderThickness = new System.Windows.Thickness(1.2), VerticalAlignment = System.Windows.VerticalAlignment.Center };
+            _tick = new System.Windows.Shapes.Path
+            {
+                Data = System.Windows.Media.Geometry.Parse("M 4.2,9.2 L 7.6,12.6 L 14,5.4"),
+                Stroke = System.Windows.Media.Brushes.White, StrokeThickness = 2,
+                StrokeStartLineCap = System.Windows.Media.PenLineCap.Round, StrokeEndLineCap = System.Windows.Media.PenLineCap.Round, StrokeLineJoin = System.Windows.Media.PenLineJoin.Round
+            };
+            _box.Child = _tick;
+            System.Windows.Controls.Grid.SetColumn(_box, 2);
+            g.Children.Add(_box);
+            _line = new System.Windows.Controls.Border { Height = 1, Background = Ui.B("Line"), VerticalAlignment = System.Windows.VerticalAlignment.Bottom, Margin = new System.Windows.Thickness(10, 0, 10, 0) };
+            root.Children.Add(g);
+            root.Children.Add(_line);
+            Child = root;
+            MouseEnter += (s, e) => { _hot = true; Paint(); };
+            MouseLeave += (s, e) => { _hot = false; Paint(); };
+            MouseLeftButtonUp += (s, e) => { if (IsEnabled) Checked = !Checked; };
+            IsEnabledChanged += (s, e) => Paint();
+            Paint();
+        }
+
+        public bool Checked
+        {
+            get { return _checked; }
+            set { if (_checked == value) return; _checked = value; Paint(); var h = CheckedChanged; if (h != null) h(); }
+        }
+        public string Value { get { return _value.Text; } set { _value.Text = value ?? ""; } }
+        public System.Windows.Media.Brush ValueBrush { set { _value.Foreground = value; } }
+        public bool Divider { set { _divider = value; Paint(); } }
+
+        private void Paint()
+        {
+            Background = _hot ? Ui.B("CardHi") : System.Windows.Media.Brushes.Transparent;
+            System.Windows.Media.Brush fill = _checked ? (IsEnabled ? Ui.B("Acc") : Ui.B("AccDim")) : Ui.B("Input");
+            _box.Background = fill;
+            _box.BorderBrush = _checked ? fill : _hot ? Ui.B("EdgeHi") : Ui.B("Edge");
+            _tick.Visibility = _checked ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            _line.Visibility = _divider && !_hot ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        }
+    }
+}
