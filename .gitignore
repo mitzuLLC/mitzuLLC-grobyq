@@ -1,0 +1,12 @@
+# build output
+bin/
+obj/
+publish/
+protected/
+dist/
+*.user
+
+# tools pulled in CI
+confuser/
+confuser.zip
+cert.pfx

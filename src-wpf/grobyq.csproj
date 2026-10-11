@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>grobyq</AssemblyName>
+    <RootNamespace>Grobyq</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Version>4.0.0</Version>
+    <FileVersion>4.0.0.0</FileVersion>
+    <Product>grobyq by mitzu LLC</Product>
+    <Company>mitzu LLC</Company>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- v4.0 needs admin for thread-priority / affinity on other processes (same as the WinForms build). -->
+  </PropertyGroup>
+
+</Project>

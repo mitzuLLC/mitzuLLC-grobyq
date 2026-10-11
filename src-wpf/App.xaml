@@ -1,0 +1,16 @@
+<Application x:Class="Grobyq.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!-- Dark palette (tuned later to match the WinForms theme) -->
+        <SolidColorBrush x:Key="Bg"     Color="#0F1113" />
+        <SolidColorBrush x:Key="Side"   Color="#15181B" />
+        <SolidColorBrush x:Key="Fg"     Color="#E6E8EA" />
+        <SolidColorBrush x:Key="Dim"    Color="#9AA0A6" />
+        <SolidColorBrush x:Key="Acc"    Color="#4C8DFF" />
+        <SolidColorBrush x:Key="Ok"     Color="#36B37E" />
+        <SolidColorBrush x:Key="Bad"    Color="#E5534B" />
+        <SolidColorBrush x:Key="Line"   Color="#23262A" />
+    </Application.Resources>
+</Application>
