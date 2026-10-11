@@ -48,11 +48,12 @@ namespace Grobyq.Pages
             _watch = Ui.Box(Settings.Get("WatchList"), 300);
             _watch.TextChanged += (s, e) => { if (!_loading) Draft("WatchList", (_watch.Text ?? "").Trim()); };
             card.Add(Ui.Row(L.T("Target processes"), L.T("Games grobyq waits for (space separated). When one starts, the parts switched on below are applied; when it exits, the optimizer goes back to armed."), _watch));
+            var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
+            toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
+            card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff));
             card.Add(SwitchRow(L.T("Game process priority"), L.T("The game gets its preset class (High, never Realtime), normal I/O and memory priority and EcoQoS off while it runs."), "DoProcess"));
-            card.Add(SwitchRow(L.T("Game core mask"), L.F("The game is pinned to the core mask from Affinity. Current rule: {0}", Settings.Get("Mask")), "DoMask"));
             card.Add(SwitchRow(L.T("Optimize threads"), L.T("A scheduler hint for the game: Ideal CPU plus a priority on its busiest threads (named rules and hot threads). Off = no thread of the game is touched."), "DoThreads"));
             card.Add(SwitchRow(L.T("Avoid CPU 0 for hot threads"), L.T("On 6+ core CPUs no hot thread gets CPU 0 as its Ideal CPU (interrupt-heavy by default)."), "SkipCpu0"));
-            card.Add(SwitchRow(L.T("Per-process affinity rules"), L.T("Apply the per-process affinity rules from Affinity > Processes (e.g. VCache+NoSMT for cs2.exe, fixed LPs for voice / VPN tools)."), "DoAffRules"));
             card.Add(SwitchRow(L.T("Thread presets for programs and services"), L.T("Apply the thread priority rules of every preset, not only the game's (NVIDIA containers, Steam, Discord, services). Priority and boost only; restored by DISABLE."), "ApplyAllPresets"));
             card.Add(SwitchRow(L.T("Re-apply periodically"), L.T("Every few seconds, while the game runs: catches new threads and anything that reset the priority."), "PeriodicReapply"));
             _period = Ui.Box(PeriodSeconds(Settings.Get("Period")), 80);

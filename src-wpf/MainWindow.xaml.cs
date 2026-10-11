@@ -40,7 +40,7 @@ namespace Grobyq
             {
                 { "home",     () => new HomePage() },
                 { "threads",  () => new ThreadsPage() },
-                { "affinity", () => new PlaceholderPage(L.T("Affinity")) },
+                { "affinity", () => new AffinityPage() },
                 { "clean",    () => new CleanupPage() },
                 { "log",      () => new JournalPage() },
                 { "settings", () => new SettingsPage() },
