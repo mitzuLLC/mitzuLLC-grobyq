@@ -1,0 +1,12 @@
+<UserControl x:Class="Grobyq.Pages.PlaceholderPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="{StaticResource Bg}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock x:Name="TitleText" FontSize="22" FontWeight="SemiBold"
+                       Foreground="{StaticResource Fg}" HorizontalAlignment="Center" />
+            <TextBlock Text="переносится в v4.0…" FontSize="13"
+                       Foreground="{StaticResource Dim}" HorizontalAlignment="Center" Margin="0,8,0,0" />
+        </StackPanel>
+    </Grid>
+</UserControl>

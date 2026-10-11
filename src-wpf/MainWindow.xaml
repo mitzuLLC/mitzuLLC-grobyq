@@ -55,13 +55,13 @@
                 </Border>
 
                 <!-- footer pinned bottom -->
-                <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">
+                <StackPanel x:Name="NavFoot" DockPanel.Dock="Bottom" Margin="0,0,0,10">
                     <Border Height="1" Background="{StaticResource Line}" Margin="0,6" />
                     <Button Content="Settings" Style="{StaticResource NavButton}" Click="Nav" Tag="settings" />
                     <Button Content="About"    Style="{StaticResource NavButton}" Click="Nav" Tag="about" />
                 </StackPanel>
 
-                <StackPanel>
+                <StackPanel x:Name="NavTop">
                     <Button Content="Home" Style="{StaticResource NavButton}" Click="Nav" Tag="home" />
                     <TextBlock Text="SYSTEM CONFIGURATION" Style="{StaticResource NavHeader}" />
                     <Button Content="Threads"  Style="{StaticResource NavButton}" Click="Nav" Tag="threads" />
@@ -73,11 +73,7 @@
             </DockPanel>
         </Border>
 
-        <!-- Content -->
-        <Grid Grid.Column="1">
-            <TextBlock x:Name="ContentText" Text="grobyq v4.0 — WPF shell"
-                       Foreground="{StaticResource Dim}" FontSize="16"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-        </Grid>
+        <!-- Content: the active page is swapped in here -->
+        <ContentControl x:Name="PageHost" Grid.Column="1" />
     </Grid>
 </Window>
