@@ -31,7 +31,7 @@
             <TextBlock Text="Оптимизация приоритетов потоков и фоновых процессов под игру."
                        Foreground="{StaticResource Dim}" FontSize="13" Margin="0,4,0,0" TextWrapping="Wrap" />
 
-            <Border Background="{StaticResource Side}" CornerRadius="10" Padding="20" Margin="0,22,0,0"
+            <Border Background="{StaticResource Card}" CornerRadius="10" Padding="20" Margin="0,22,0,0"
                     BorderBrush="{StaticResource Line}" BorderThickness="1">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">

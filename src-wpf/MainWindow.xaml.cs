@@ -69,7 +69,8 @@ namespace Grobyq
             {
                 bool sel = string.Equals(b.Tag as string, tag, StringComparison.OrdinalIgnoreCase);
                 b.Foreground = (Brush)FindResource(sel ? "Fg" : "Dim");
-                b.Background = sel ? (Brush)FindResource("Line") : Brushes.Transparent;
+                b.Background = sel ? (Brush)FindResource("AccDim") : Brushes.Transparent;
+                b.FontWeight = sel ? FontWeights.SemiBold : FontWeights.Normal;
             }
         }
 

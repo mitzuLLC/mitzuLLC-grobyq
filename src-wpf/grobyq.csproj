@@ -24,4 +24,9 @@
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- logo / icon assets, referenced by pack URI (/Assets/..) -->
+    <Resource Include="Assets\*.png" />
+  </ItemGroup>
+
 </Project>

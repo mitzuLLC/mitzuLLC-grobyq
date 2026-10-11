@@ -3,15 +3,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Dark palette (tuned later to match the WinForms theme) -->
-        <SolidColorBrush x:Key="Bg"     Color="#0F1113" />
-        <SolidColorBrush x:Key="Side"   Color="#15181B" />
-        <SolidColorBrush x:Key="Fg"     Color="#E6E8EA" />
-        <SolidColorBrush x:Key="Dim"    Color="#9AA0A6" />
-        <SolidColorBrush x:Key="Acc"    Color="#4C8DFF" />
-        <SolidColorBrush x:Key="Ok"     Color="#36B37E" />
-        <SolidColorBrush x:Key="Warn"   Color="#E0A030" />
-        <SolidColorBrush x:Key="Bad"    Color="#E5534B" />
-        <SolidColorBrush x:Key="Line"   Color="#23262A" />
+        <!-- grobyq dark palette (matches the original Theme.cs) -->
+        <SolidColorBrush x:Key="Bg"     Color="#060606" />
+        <SolidColorBrush x:Key="Side"   Color="#0A0A0C" />
+        <SolidColorBrush x:Key="Card"   Color="#101014" />
+        <SolidColorBrush x:Key="LogBg"  Color="#09090B" />
+        <SolidColorBrush x:Key="Fg"     Color="#EDEDED" />
+        <SolidColorBrush x:Key="Dim"    Color="#8A8A94" />
+        <SolidColorBrush x:Key="Faint"  Color="#5A5A64" />
+        <SolidColorBrush x:Key="Acc"    Color="#4A8BFF" />
+        <SolidColorBrush x:Key="AccDim" Color="#1E3462" />
+        <SolidColorBrush x:Key="Ok"     Color="#4CD68A" />
+        <SolidColorBrush x:Key="Warn"   Color="#E8B448" />
+        <SolidColorBrush x:Key="Bad"    Color="#E05A5A" />
+        <SolidColorBrush x:Key="Line"   Color="#1C1C22" />
     </Application.Resources>
 </Application>

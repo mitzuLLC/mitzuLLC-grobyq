@@ -8,8 +8,14 @@
     </UserControl.Resources>
     <Grid Background="{StaticResource Bg}">
         <StackPanel Margin="40,36,40,0" MaxWidth="760" HorizontalAlignment="Left">
-            <TextBlock Text="grobyq" FontSize="30" FontWeight="SemiBold" Foreground="{StaticResource Fg}" />
-            <TextBlock x:Name="VersionText" FontSize="13" Foreground="{StaticResource Dim}" Margin="0,2,0,0" />
+            <StackPanel Orientation="Horizontal">
+                <Image Source="/Assets/glyph_96.png" Height="52" Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" />
+                <StackPanel VerticalAlignment="Center" Margin="16,0,0,0">
+                    <TextBlock Text="grobyq" FontSize="30" FontWeight="SemiBold" Foreground="{StaticResource Fg}" />
+                    <TextBlock x:Name="VersionText" FontSize="13" Foreground="{StaticResource Dim}" Margin="0,2,0,0" />
+                </StackPanel>
+            </StackPanel>
 
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Dim}" FontSize="13" Margin="0,20,0,0"
                        Text="Core-aware оптимизатор потоков и привязки под киберспорт. Приоритеты потоков, affinity, прерывания и фон — под стабильный frame-time в CS2." />
