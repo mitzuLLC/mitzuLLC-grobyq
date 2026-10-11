@@ -169,7 +169,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: grobyq-${{ github.ref_name }}
+          name: grobyq-${{ env.REL_TAG }}       # ref_name may hold a '/' (release/<ver>), not allowed in artifact names
           path: |
             dist/grobyq-setup.exe
             dist/version.json
