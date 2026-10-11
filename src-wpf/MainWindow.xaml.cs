@@ -22,7 +22,7 @@ namespace Grobyq
             _factories = new Dictionary<string, Func<UserControl>>(StringComparer.OrdinalIgnoreCase)
             {
                 { "home",     () => new HomePage() },
-                { "threads",  () => new PlaceholderPage("Threads") },
+                { "threads",  () => new ThreadsPage() },
                 { "affinity", () => new PlaceholderPage("Affinity") },
                 { "clean",    () => new PlaceholderPage("System cleanup") },
                 { "log",      () => new JournalPage() },
@@ -31,6 +31,7 @@ namespace Grobyq
             };
 
             SeedLog();
+            new Optimizer();          // engine-driving service (watch loop + apply/revert); sets Optimizer.Instance
             Navigate("home");
         }
 

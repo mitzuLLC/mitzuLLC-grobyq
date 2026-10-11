@@ -10,6 +10,7 @@
         <SolidColorBrush x:Key="Dim"    Color="#9AA0A6" />
         <SolidColorBrush x:Key="Acc"    Color="#4C8DFF" />
         <SolidColorBrush x:Key="Ok"     Color="#36B37E" />
+        <SolidColorBrush x:Key="Warn"   Color="#E0A030" />
         <SolidColorBrush x:Key="Bad"    Color="#E5534B" />
         <SolidColorBrush x:Key="Line"   Color="#23262A" />
     </Application.Resources>
