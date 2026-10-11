@@ -35,6 +35,9 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # secrets can't be used in a step `if:` directly — map to a job env first, then gate on it.
+      HAS_CERT: ${{ secrets.SIGN_PFX_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +76,7 @@ jobs:
 
       # ---- 4. sign the obfuscated exe (only when the cert secret is configured; build still runs without it) ----
       - name: Sign exe (Authenticode)
-        if: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+        if: env.HAS_CERT == 'true'
         shell: pwsh
         env:
           PFX_B64: ${{ secrets.SIGN_PFX_BASE64 }}
