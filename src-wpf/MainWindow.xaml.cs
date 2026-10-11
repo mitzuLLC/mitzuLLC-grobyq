@@ -24,10 +24,10 @@ namespace Grobyq
                 { "home",     () => new HomePage() },
                 { "threads",  () => new ThreadsPage() },
                 { "affinity", () => new PlaceholderPage("Affinity") },
-                { "clean",    () => new PlaceholderPage("System cleanup") },
+                { "clean",    () => new CleanupPage() },
                 { "log",      () => new JournalPage() },
                 { "settings", () => new SettingsPage() },
-                { "about",    () => new PlaceholderPage("About") },
+                { "about",    () => new AboutPage() },
             };
 
             SeedLog();
