@@ -4,6 +4,9 @@
 #ifndef SrcDir
   #define SrcDir "publish"
 #endif
+#ifndef OutDir
+  #define OutDir "dist"
+#endif
 #define AppVer "4.0.0"
 
 [Setup]
@@ -13,13 +16,12 @@ AppPublisher=mitzu LLC
 DefaultDirName={autopf}\grobyq
 DefaultGroupName=grobyq
 UninstallDisplayIcon={app}\grobyq.exe
-OutputDir=dist
+OutputDir={#OutDir}
 OutputBaseFilename=grobyq-setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
-SourceDir=.
 
 [Files]
 Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

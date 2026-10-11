@@ -95,8 +95,10 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $src = (Test-Path protected/grobyq.exe) ? "protected" : "publish"
-          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DSrcDir=$src build\grobyq.iss
+          # absolute paths: Inno resolves relative SourceDir/OutputDir against the .iss folder (build\), not the repo root
+          $src = (Test-Path protected/grobyq.exe) ? "$PWD\protected" : "$PWD\publish"
+          $out = "$PWD\dist"
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DSrcDir=$src /DOutDir=$out build\grobyq.iss
           if (-not (Test-Path dist/grobyq-setup.exe)) { throw "installer not produced" }
 
       # ---- 6. publish artifacts + update manifest ----
