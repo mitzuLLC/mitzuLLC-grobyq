@@ -26,7 +26,7 @@ namespace Grobyq
                 { "affinity", () => new PlaceholderPage("Affinity") },
                 { "clean",    () => new PlaceholderPage("System cleanup") },
                 { "log",      () => new JournalPage() },
-                { "settings", () => new PlaceholderPage("Settings") },
+                { "settings", () => new SettingsPage() },
                 { "about",    () => new PlaceholderPage("About") },
             };
 
