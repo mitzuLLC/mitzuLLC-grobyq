@@ -32,7 +32,7 @@ namespace Grobyq.Pages
             var card = SubCard(p);
             _swMask = Ui.Switch(_pDoMask);
             _swMask.Click += (s, e) => { _pDoMask = _swMask.IsChecked == true; CoresShow(); UpdateSaveBar(null); };
-            card.Add(Ui.Row(L.T("Apply the game core mask"), L.T("Off = Windows decides where the game runs (stock). On = while the optimizer runs, the game gets the cores below; DISABLE gives it its original cores back."), _swMask));
+            card.Add(Ui.Row(L.T("Apply the game core mask"), L.T("Off = Windows decides where the game runs (stock). On = while the game threads optimizer runs, the game gets the cores below; switching it off gives the game its original cores back."), _swMask));
             var intro = card.Add(Ui.Text(L.T("Pick a base rule for this CPU, then untick a core or a single thread the game should not use, or tick one back, and press Save. Cores that device interrupts are pinned to can leave the mask by themselves."), 9, "Dim"));
             intro.Margin = new Thickness(0, 10, 0, 4);
 

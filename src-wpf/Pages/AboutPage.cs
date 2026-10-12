@@ -15,7 +15,7 @@ namespace Grobyq.Pages
             // ---- purpose ----
             Heading(L.T("Purpose"), true);
             var pc = Box();
-            var purpose = pc.Add(Ui.Text(L.T("grobyq lowers input latency and smooths frame-time by tuning thread priorities and CPU-core affinity - for the game and for the rest of the system (services, drivers, background apps), so the game's threads get the cores and CPU time first. It only changes thread priority, boost and affinity, and it is fully reversible: DISABLE or Reset returns Windows to its defaults. No Realtime class, no freezing or killing of threads. Device and cleanup changes happen only through their own buttons."), 10, "Fg"));
+            var purpose = pc.Add(Ui.Text(L.T("grobyq lowers input latency and smooths frame-time by tuning thread priorities and CPU-core affinity - for the game and for the rest of the system (services, drivers, background apps), so the game's threads get the cores and CPU time first. It only changes thread priority, boost and affinity, and it is fully reversible: switching the optimizers off returns every change to its Windows default. No Realtime class, no freezing or killing of threads. Device and cleanup changes happen only through their own buttons."), 10, "Fg"));
             purpose.Margin = new Thickness(0, 6, 0, 8);
             purpose.LineHeight = Ui.Pt(10) * 1.45;
 

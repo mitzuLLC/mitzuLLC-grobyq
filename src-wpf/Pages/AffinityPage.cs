@@ -144,7 +144,7 @@ namespace Grobyq.Pages
             _cancel.IsEnabled = n > 0;
             if (n > 0) { _saveText.Text = L.F("Unsaved changes: {0}", n); _saveText.Foreground = Ui.B("Warn"); }
             else if (done != null) { _saveText.Text = done; _saveText.Foreground = Ui.B("Ok"); }
-            else { _saveText.Text = L.T("Nothing is changed until you switch a part on, press Save and ENABLE."); _saveText.Foreground = Ui.B("Dim"); }
+            else { _saveText.Text = L.T("Nothing is changed until you switch a part on and press Save. It applies while the game threads optimizer is on."); _saveText.Foreground = Ui.B("Dim"); }
         }
 
         private void SaveDraft()
@@ -169,7 +169,7 @@ namespace Grobyq.Pages
             if (o != null) o.Reapply();
             LoadDraft();
             RefreshAll();
-            UpdateSaveBar(active ? L.T("Saved - applied now.") : L.T("Saved. Press ENABLE to apply."));
+            UpdateSaveBar(active ? L.T("Saved - applied now.") : L.T("Saved. Turn the game threads optimizer on to apply."));
         }
 
         private void RefreshAll()

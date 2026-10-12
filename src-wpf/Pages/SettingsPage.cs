@@ -46,7 +46,7 @@ namespace Grobyq.Pages
             Section(L.T("Startup and window"), false);
             var bc = Card();
             bc.Add(ToggleRow(L.T("Close to tray"), L.T("The window close button hides grobyq to the tray instead of exiting (exit from the tray menu)."), "CloseToTray"));
-            bc.Add(ToggleRow(L.T("Restore Windows defaults on exit"), L.T("On exit every process and thread grobyq changed goes back to its captured baseline, the optimizer on or off (manual Live threads edits included). Off = changes stay until a reboot or DISABLE."), "RestoreOnExit"));
+            bc.Add(ToggleRow(L.T("Restore Windows defaults on exit"), L.T("On exit every process and thread grobyq changed goes back to its captured baseline. Off = changes stay until a reboot or until the optimizers are switched off."), "RestoreOnExit"));
             _auto = Ui.Switch(false);
             _auto.IsEnabled = false;                       // the real state is read from Task Scheduler on enter
             _auto.Click += (s, e) => SetAutostart(_auto.IsChecked == true);
