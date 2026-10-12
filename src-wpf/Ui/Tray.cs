@@ -142,6 +142,10 @@ namespace Grobyq
     {
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
+        private const int GWL_EXSTYLE = -20;
+        private const long WS_EX_TOOLWINDOW = 0x00000080;
         [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private const uint SWP_NOSIZE = 0x0001, SWP_NOACTIVATE = 0x0010;
@@ -226,6 +230,17 @@ namespace Grobyq
             card.Child = stack;
             Content = card;
 
+            // a tool window: never listed in Alt+Tab while it is open
+            SourceInitialized += (s, e) =>
+            {
+                try
+                {
+                    var h = new WindowInteropHelper(this).Handle;
+                    long ex = GetWindowLongPtr(h, GWL_EXSTYLE).ToInt64();
+                    SetWindowLongPtr(h, GWL_EXSTYLE, new IntPtr(ex | WS_EX_TOOLWINDOW));
+                }
+                catch { }
+            };
             Deactivated += (s, e) => Hide();
             PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { e.Handled = true; Hide(); } };
             DpiChanged += (s, e) => { if (IsVisible) Dispatcher.BeginInvoke((Action)(() => Place())); };
