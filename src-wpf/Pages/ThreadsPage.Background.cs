@@ -179,7 +179,7 @@ namespace Grobyq.Pages
             if (o != null) o.StopAll();
             Settings.Reset("WatchList", "GameLabels", "DoProcess", "DoThreads", "SkipCpu0", "PeriodicReapply", "Period", "TopN",
                            "DoBackground", "BgAffinity", "BgForeground", "BgProcs", "ApplyAllPresets", "AllowProtectedPriority",
-                           "AdvancedThreadMode", "GameOpt", "SystemThreadOpt", "AutoEnable");
+                           "AdvancedThreadMode", "GameOpt", "SystemThreadOpt", "AutoEnable", "StarveGuard");
             if (o != null)
             {
                 o.Eng.UnderLock(() => { o.Eng.Presets = Store.Defaults(); o.Eng.BgClasses = Store.DefaultBg(); });

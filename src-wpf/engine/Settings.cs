@@ -122,6 +122,7 @@ namespace Grobyq
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
                 { "AllowProtectedPriority", "0" }, // Advanced: priority on protected system processes (off by default)
+                { "StarveGuard", "1" },           // DWM, Windows services and Steam never below Below normal (the game waits on them)
                 { "RestoreOnExit", "1" },
                 { "AdvancedThreadMode", "0" },    // TimeCritical (15) selectable in thread rules (Advanced, warned)
                 { "LogOpen", "0" },            // the log starts folded: in a normal window the pages keep their full height

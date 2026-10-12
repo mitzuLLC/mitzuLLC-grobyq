@@ -234,9 +234,20 @@ namespace Grobyq
             if (rebuild || sig != _stateSig) { _stateSig = sig; StateChanged?.Invoke(); }
         }
 
+        // Which chosen games run now: one process snapshot per tick for all of them.
         private string RunningGames()
         {
-            return string.Join(", ", Eng.Targets.Where(t => ByNameCount(t) > 0));
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var p in Process.GetProcesses())
+                {
+                    try { names.Add(p.ProcessName); } catch { }
+                    finally { try { p.Dispose(); } catch { } }
+                }
+            }
+            catch { }
+            return string.Join(", ", Eng.Targets.Where(t => names.Contains(t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? t.Substring(0, t.Length - 4) : t)));
         }
 
         public ApplyOptions Opts() => new ApplyOptions

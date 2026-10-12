@@ -19,7 +19,7 @@ namespace Grobyq.Pages
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
 
-        private readonly CheckBox _gameSw, _sysSw, _frontSw;
+        private readonly CheckBox _gameSw, _sysSw, _frontSw, _guardSw;
         private readonly Ellipse _gameDot, _sysDot;
         private readonly TextBlock _gameStat, _sysStat;
         private readonly Dictionary<string, BoxCheck> _known = new Dictionary<string, BoxCheck>(StringComparer.OrdinalIgnoreCase);
@@ -64,7 +64,16 @@ namespace Grobyq.Pages
                 var o = Optimizer.Instance; if (o != null) o.Refresh();
                 UpdateState();
             };
-            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Recommended on. The game is minimized or you alt-tab - everything grobyq changed goes back to normal; back in the game - applied again. Off = kept while the game runs."), _frontSw, false));
+            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Recommended on. The game is minimized or you alt-tab - everything grobyq changed goes back to normal; back in the game - applied again. Off = kept while the game runs."), _frontSw));
+            _guardSw = Ui.Switch(Settings.GetBool("StarveGuard"));
+            _guardSw.Click += (s, e) =>
+            {
+                bool on = _guardSw.IsChecked == true;
+                Settings.SetBool("StarveGuard", on);
+                AppLog.Add("[UI] freeze guard = " + (on ? "on" : "off"));
+                var o = Optimizer.Instance; if (o != null) o.ApplyNow();      // in a game session: restore, apply with the new rule
+            };
+            top.Add(Ui.Row(L.T("Freeze guard"), L.T("Recommended on. DWM, Windows services and Steam never go below Below normal: under the game, above the background apps. Without it a busy browser can starve a thread the game waits on, and the game freezes for seconds."), _guardSw, false));
 
             // ---- games ----
             Title(L.T("Games"));
@@ -354,6 +363,7 @@ namespace Grobyq.Pages
             {
                 foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
                 if (_frontSw != null) _frontSw.IsChecked = Settings.GetBool("BgForeground");
+                if (_guardSw != null) _guardSw.IsChecked = Settings.GetBool("StarveGuard");
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
                 _labels.Clear();

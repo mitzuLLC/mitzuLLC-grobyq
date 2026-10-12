@@ -1286,5 +1286,7 @@
  "Catch new threads": "Подхватывать новые потоки",
  "While the game is in front: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again.": "Пока игра на экране: раз в 2 с новые потоки игры и процессов из профиля получают свои настройки. То, что уже настроено, только проверяется и повторно не записывается.",
  "{0} is minimized - normal mode": "{0} свёрнута — обычный режим",
- "waiting for a game in front - nothing is changed now": "ждёт игру на экране — сейчас ничего не меняется"
+ "waiting for a game in front - nothing is changed now": "ждёт игру на экране — сейчас ничего не меняется",
+ "Freeze guard": "Защита от зависаний",
+ "Recommended on. DWM, Windows services and Steam never go below Below normal: under the game, above the background apps. Without it a busy browser can starve a thread the game waits on, and the game freezes for seconds.": "Рекомендуется вкл. DWM, службы Windows и Steam не опускаются ниже «ниже среднего»: ниже игры, но выше фоновых программ. Без этого занятый браузер может «задушить» поток, которого ждёт игра, — и она зависает на секунды."
 }

@@ -336,6 +336,54 @@ namespace Grobyq
         private static string Base(string exe) { return exe.ToLowerInvariant().EndsWith(".exe") ? exe.Substring(0, exe.Length - 4) : exe; }
         private static Process[] ByName(string exe) { try { return Process.GetProcessesByName(Base(exe)); } catch { return new Process[0]; } }
 
+        // A process by PID and name, no handle. Inside an apply cycle every lookup reads ONE process snapshot taken at the
+        // start of the cycle (a lookup per name was a full system snapshot each - ~90 per pass, heavier with every browser
+        // process and thread); outside a cycle it asks Windows directly.
+        private struct Pn { public int Id; public string Name; }
+        private Dictionary<string, List<Pn>> _pidCache;
+
+        private List<Pn> Procs(string exe)
+        {
+            string key = Base(exe);
+            if (_pidCache != null) { List<Pn> l; return _pidCache.TryGetValue(key, out l) ? l : new List<Pn>(); }
+            var res = new List<Pn>();
+            foreach (var p in ByName(exe)) { try { res.Add(new Pn { Id = p.Id, Name = p.ProcessName }); } catch { } finally { try { p.Dispose(); } catch { } } }
+            return res;
+        }
+
+        private void FillPidCache()
+        {
+            var d = new Dictionary<string, List<Pn>>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var p in Process.GetProcesses())
+                {
+                    try
+                    {
+                        string n = p.ProcessName;
+                        List<Pn> l;
+                        if (!d.TryGetValue(n, out l)) { l = new List<Pn>(); d[n] = l; }
+                        l.Add(new Pn { Id = p.Id, Name = n });
+                    }
+                    catch { }
+                    finally { try { p.Dispose(); } catch { } }
+                }
+            }
+            catch { d = null; }
+            _pidCache = d;
+        }
+
+        // ---- starvation guard (on by default) ----
+        // The processes a game waits on - Windows' protected ones (DWM, csrss, services...) and Steam (the game's Steam API
+        // calls are IPC round trips to steam.exe) - never go below "Below normal": under the game, above the lowered
+        // background apps. A thread at Idle (priority 1) loses every contest to a busy background app (an Idle-class
+        // browser runs at 4-6) and gets the CPU only when Windows' starvation boost lifts it after ~4 s: a game waiting
+        // on it freezes for seconds.
+        public static readonly HashSet<string> Companions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "steam", "steamservice", "steamwebhelper", "gameoverlayui" };
+        public static bool StarveGuard { get { return Settings.GetBool("StarveGuard"); } }
+        public static bool Guarded(string exe) { return StarveGuard && (IsProtected(exe) || Companions.Contains(BareName(exe))); }
+
         private void AdviceOnce(List<string> log, string key, string msg)
         {
             if (_adviceOnce.Contains(key)) return;
@@ -505,7 +553,7 @@ namespace Grobyq
             report.MaskLps = mask.LPs;
 
             int nThread = 0;
-            foreach (var p in ByName(target))
+            foreach (var p in Procs(target))
             {
                 int lvl, err;
                 IntPtr hp = Native.OpenProcessGraceful((uint)p.Id, out lvl, out err);
@@ -761,11 +809,11 @@ namespace Grobyq
                     AdviceOnce(log, "resvrule:" + exe + m + reserved, string.Format("[AF] {0}: rule {1} mixes reserved and unreserved LP - using {2} LP {3} (ReservedCpuSets guard)", exe, rr.Hex, Masks.Hex(kept), Masks.Ranges(kept)));
                     m = kept;
                 }
-                foreach (var p in ByName(exe))
+                foreach (var p in Procs(exe))
                 {
                     int lvl, err;
                     IntPtr hp = Native.OpenProcessGraceful((uint)p.Id, out lvl, out err);
-                    if (hp == IntPtr.Zero) { log.Add(string.Format("[AF] {0} PID {1}: access denied", exe, p.Id)); continue; }
+                    if (hp == IntPtr.Zero) { AdviceOnce(log, "afdeny:" + p.Id, string.Format("[AF] {0} PID {1}: access denied", exe, p.Id)); continue; }
                     try
                     {
                         Identity(p.Id, hp);
@@ -832,7 +880,7 @@ namespace Grobyq
                 string gate = Gate(b, Op.Process, ProtectedPriorityAllowed);
                 if (gate != null) { AdviceOnce(log, "gate:bg:" + bn, gate); continue; }
                 if (targets.Contains(b) || targets.Contains(bn + ".exe")) continue;   // a game in the background list is still the game
-                foreach (var bp in ByName(b))
+                foreach (var bp in Procs(b))
                 {
                     int lvl, err;
                     IntPtr hp = Native.OpenProcessGraceful((uint)bp.Id, out lvl, out err);
@@ -851,10 +899,19 @@ namespace Grobyq
                         uint clsV;
                         if (!PRIO.TryGetValue(clsB, out clsV) || string.Equals(clsB, "Realtime", StringComparison.OrdinalIgnoreCase) || string.Equals(clsB, "High", StringComparison.OrdinalIgnoreCase))
                         { clsB = "BelowNormal"; clsV = PRIO[clsB]; }
+                        // starvation guard: a process the game waits on (Steam) steps aside only to Below normal, with normal
+                        // I/O and memory priority - never under the background apps, never paged out first
+                        bool guarded = Guarded(b);
+                        if (guarded && string.Equals(clsB, "Idle", StringComparison.OrdinalIgnoreCase))
+                        {
+                            clsB = "BelowNormal"; clsV = PRIO[clsB];
+                            AdviceOnce(log, "guardbg:" + bn, string.Format("[BG] {0}: Below normal instead of Idle (starvation guard: the game waits on it)", bn));
+                        }
+                        uint ioV = guarded ? IOP["Normal"] : IOP["VeryLow"], memV = guarded ? MEM["Normal"] : MEM["Low"];
                         bool bgChanged = false;
                         if (Native.GetPriorityClass(hp) != clsV) { Native.SetPriorityClass(hp, clsV); bgChanged = true; }
-                        if (Native.GetProcIo(hp) != IOP["VeryLow"]) { Native.SetProcIo(hp, IOP["VeryLow"]); bgChanged = true; }
-                        if (Native.GetMemPrio(hp) != MEM["Low"]) { Native.SetMemPrio(hp, MEM["Low"], false); bgChanged = true; }
+                        if (Native.GetProcIo(hp) != ioV) { Native.SetProcIo(hp, ioV); bgChanged = true; }
+                        if (Native.GetMemPrio(hp) != memV) { Native.SetMemPrio(hp, memV, false); bgChanged = true; }
                         string mtxt = "mask untouched";
                         bool ruled = AffRules.ContainsKey(b) || AffRules.ContainsKey(bn + ".exe");      // a per-process rule wins
                         if (bgAffinity && !ruled)
@@ -870,7 +927,7 @@ namespace Grobyq
                         }
                         else if (ruled) mtxt = "mask = its affinity rule";
                         _appliedBg.Add(bp.Id); n++;
-                        if (bgChanged) log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io VeryLow / {3}", bp.ProcessName, bp.Id, clsB, mtxt));
+                        if (bgChanged) log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io {3} / {4}", bp.Name, bp.Id, clsB, guarded ? "Normal" : "VeryLow", mtxt));
                     }
                     finally { Native.CloseHandle(hp); }
                 }
@@ -916,20 +973,16 @@ namespace Grobyq
         }
 
         // Disposes the Process[] it enumerates (GetProcessesByName leaks a handle per object otherwise).
-        private static int RunningCount(string exe)
-        {
-            var a = ByName(exe); int n = a.Length;
-            foreach (var p in a) { try { p.Dispose(); } catch { } }
-            return n;
-        }
+        private int RunningCount(string exe) { return Procs(exe).Count; }
 
         public List<string> ApplyAll(ApplyOptions o)
         {
             lock (_gate)
             {
                 _tidCache = Native.AllThreadIdsByPid();   // Lever 1: one system-wide thread snapshot shared by the whole cycle
+                FillPidCache();                           // ...and one process snapshot
                 try { return ApplyAllCore(o); }
-                finally { _tidCache = null; }
+                finally { _tidCache = null; _pidCache = null; }
             }
         }
 
@@ -977,12 +1030,13 @@ namespace Grobyq
                 var log = new List<string>();
                 if (SystemPresets == null || SystemPresets.Count == 0) { UpdateSysStats(); return log; }
                 _tidCache = Native.AllThreadIdsByPid();
+                FillPidCache();
                 try
                 {
                     Native.EnableDebugPrivilege();
                     ApplySet(SystemPresets, new HashSet<string>(Targets ?? new string[0], StringComparer.OrdinalIgnoreCase), log, "sys:");
                 }
-                finally { _tidCache = null; }
+                finally { _tidCache = null; _pidCache = null; }
                 UpdateSysStats();
                 return log;
             }
@@ -1189,10 +1243,8 @@ namespace Grobyq
                 if (preset == null || !preset.Enabled || (preset.Threads.Count == 0 && !procBoost)) continue;
                 string gate = Gate(exe, Op.Thread, ProtectedPriorityAllowed);
                 if (gate != null) { AdviceOnce(log, "gate:" + tag + exe, gate); continue; }
-                var ps = ByName(exe);
-                try
                 {
-                    foreach (var p in ps)
+                    foreach (var p in Procs(exe))
                     {
                         int pid = p.Id;
                         // ProcessBoost is a cheap, idempotent process attribute (it early-returns when already set) - leave it per cycle.
@@ -1211,7 +1263,6 @@ namespace Grobyq
                         }
                     }
                 }
-                finally { foreach (var p in ps) { try { p.Dispose(); } catch { } } }
             }
         }
 
@@ -1243,6 +1294,7 @@ namespace Grobyq
         {
             setCount = 0;
             bool prot = IsProtected(preset.Exe);
+            bool guarded = Guarded(preset.Exe);
             var log = new List<string>();
             var snap = Snapshot(pid);
             if (!snap.Ok || snap.Rows.Count == 0) return log;
@@ -1264,7 +1316,16 @@ namespace Grobyq
                         var tb = ThreadBaseline(key, ht);
                         Debug.Assert(_thrBefore.ContainsKey(key), "thread baseline must be captured before any set");
                         int tp; bool did = false;
-                        if (ThreadPrio(rule.Prio, adv, out tp)) { MarkPrio(tb, ht); if (Native.GetThreadPriority(ht) != tp) { Native.SetThreadPriority(ht, tp); did = true; } }
+                        if (ThreadPrio(rule.Prio, adv, out tp))
+                        {
+                            if (guarded && tp < TPRIO["BelowNormal"])
+                            {
+                                tp = TPRIO["BelowNormal"];
+                                AdviceOnce(log, "guardthr:" + preset.Exe, string.Format("[TH] {0}: Idle / Lowest rules run as Below normal (starvation guard: the game waits on this process)", preset.Exe));
+                            }
+                            MarkPrio(tb, ht);
+                            if (Native.GetThreadPriority(ht) != tp) { Native.SetThreadPriority(ht, tp); did = true; }
+                        }
                         bool wantOff = string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase), wantOn = string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase);
                         if (wantOff || wantOn)
                         {
