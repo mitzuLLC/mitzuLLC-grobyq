@@ -34,6 +34,9 @@
     <!-- interface languages: English is the key, these map English -> translation (L.Load reads lang.<code>.json) -->
     <EmbeddedResource Include="Lang\ru.json" LogicalName="lang.ru.json" />
     <EmbeddedResource Include="Lang\uk.json" LogicalName="lang.uk.json" />
+    <!-- startup animation (94 JPEG frames, "GQSP") and the built-in system thread profile (System thread optimizer) -->
+    <EmbeddedResource Include="Assets\splash.bin" LogicalName="splash.bin" />
+    <EmbeddedResource Include="Assets\system-threads.txt" LogicalName="system-threads.txt" />
   </ItemGroup>
 
 </Project>

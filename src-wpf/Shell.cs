@@ -23,10 +23,12 @@ namespace Grobyq
                 Post(() => { Sys = s; var h = SysLoaded; if (h != null) h(); });
             }) { IsBackground = true, Name = "grobyq-sysinfo" };
             th.Start();
-            RecheckLicense(false);
+            // the startup gate has just validated the license: show that result, no second request to the list
+            if (Licensing.LastKnown() != null) { AppLog.Add("[LIC] " + Licensing.LastKnown().Message); Post(() => { var h = LicenseChanged; if (h != null) h(); }); }
+            else RecheckLicense(false);
         }
 
-        // Background license check (not a gate yet): fills Home > License. log = write the result line to the log.
+        // Background license re-check (Home > Recheck): fills Home > License. log = write the result line to the log.
         public static void RecheckLicense(bool log)
         {
             if (Interlocked.CompareExchange(ref _licBusy, 1, 0) != 0) return;

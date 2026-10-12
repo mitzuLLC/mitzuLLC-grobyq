@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 
 namespace Grobyq
@@ -105,7 +107,6 @@ namespace Grobyq
             if (string.IsNullOrEmpty(url) || url.IndexOf("CHANGE-ME", StringComparison.OrdinalIgnoreCase) >= 0 || url.StartsWith("@@"))
                 return new LicResult { Ok = false, Net = true, Message = L.N("License list URL is not configured.") };
 
-            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
             string body = FetchList(url);   // throws on network failure -> caught by Validate
 
             var ser = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
@@ -225,21 +226,45 @@ namespace Grobyq
         }
 
         // ---------------- http ----------------
+        // One HttpClient for the process (system proxy, TLS 1.2/1.3 negotiated by the OS), 10 s per request; the calls run on
+        // worker threads only (gate, Home > Recheck), so the synchronous Send never blocks the UI.
+        private static readonly HttpClient _http = MakeClient();
+
+        private static HttpClient MakeClient()
+        {
+            var h = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate };
+            var c = new HttpClient(h) { Timeout = TimeSpan.FromSeconds(10) };
+            c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", UA);
+            return c;
+        }
+
         private static string HttpGet(string url, string accept, bool githubApi)
         {
-            var req = (HttpWebRequest)WebRequest.Create(url);
-            req.Method = "GET"; req.UserAgent = UA; req.Accept = accept;
-            if (githubApi) req.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-            req.Timeout = 10000; req.ReadWriteTimeout = 10000;
-            req.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
-            using (var resp = (HttpWebResponse)req.GetResponse())
-            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+            using (var req = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                string t = sr.ReadToEnd();
-                int code = (int)resp.StatusCode;
-                if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
-                return t;
+                req.Headers.TryAddWithoutValidation("Accept", accept);
+                if (githubApi) req.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+                req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+                using (var resp = _http.Send(req, HttpCompletionOption.ResponseContentRead))
+                {
+                    int code = (int)resp.StatusCode;
+                    if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+                    using (var st = resp.Content.ReadAsStream())
+                    using (var sr = new StreamReader(st, Encoding.UTF8))
+                        return sr.ReadToEnd();
+                }
             }
+        }
+
+        // "   Purchased: 2026-01-02   Expires: 2027-01-02   (grobyq list)" - the license window and Home show it.
+        public static string Dates(LicResult r)
+        {
+            if (r == null) return "";
+            string s = "";
+            if (r.Purchase.HasValue) s += "   " + L.T("Purchased:") + " " + r.Purchase.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (r.Expires.HasValue) s += "   " + L.T("Expires:") + " " + r.Expires.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (!string.IsNullOrEmpty(r.Source)) s += "   (" + r.Source + ")";
+            return s;
         }
 
         // ---------------- small helpers ----------------

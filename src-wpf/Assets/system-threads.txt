@@ -1,0 +1,381 @@
+; If you are not confident in your knowledge, do not make any changes to this configuration
+; The developer is not responsible for the consequences of your actions and changes in the settings
+; Carefully read the comments on the parameters indicated by the sign " ; "
+
+[SETTINGS]
+sleep=10000
+
+; When the game window is actively, the script turns off Explorer and its subsidiary processes, also includes the functions of [PROCESSESTOSUSPEND] and [SETPROCESSESTOIDLEPRIORITY]
+[GAMES]
+VALORANT-Win64-Shipping
+cs2
+FortniteClient-Win64-Shipping
+
+; Processes that go to suspend with an active game window
+[PROCESSESTOSUSPEND]
+googleupdate
+searchindexer
+Riot Client
+RiotClientCrashHandler
+RiotClientServices
+GameBarPresenceWriter
+spoolsv
+lghub_agent
+lghub_system_tray
+lghub_updater
+logi_lamparray_service
+MoUsoCoreWorker
+msedgewebview2
+NVDisplay.Container
+notepad
+RazerAppEngine
+RzEngineMon
+ShareX
+sihost
+SteelSeriesGG
+SteelSeriesPrism
+SteelSeriesSvcLauncher
+SteelSeriesSonar
+
+; Processes that go to Low Priority with an active game window
+[SETPROCESSESTOIDLEPRIORITY]
+;audiodg
+fontdrvhost
+NVIDIA Overlay
+nvsphelper64
+rundll32
+ShareX
+winws
+WmiPrvSE
+Lightshot
+chrome
+Telegram
+steam
+
+; A list of processes for which a priority boost will leave
+[DISABLEBOOST]
+explorer
+dwm
+audiodg
+gamingservices
+gamingservicesnet
+svchost
+rundll32
+ShellHost
+msedgewebview2
+ShellExperienceHost
+SearchHost
+NVIDIA Overlay
+nvcontainer
+NVDisplay.Container
+WMIADAP
+winlogon
+WmiPrvSE
+dllhost
+RuntimeBroker
+discord
+AerialTool_Threads
+
+[VALORANT-Win64-Shipping]
+description=*BackgroundThreadPool*, -15
+description=*FTelemetryWorker*, -15
+description=*LogWorker*, -15
+description=*ScreenSaverInhibitor*, -15
+description=*TelemetrySched*, -15
+module=VALORANT-Win64-Shipping.exe, -1
+
+[cs2]
+description=*D3D11RenderThread*, -1
+description=*MainThrd*, -1
+module=steamnetworkingsockets.dll, -1
+module=embree3.dll, -1
+module=phonon.dll, -1
+module=nvwgf2umx.dll, -15, tid=last
+module=video64.dll, -15
+module=steamclient64.dll, 300
+
+[dota2]
+description=*D3D11RenderThread*, -1
+module=InputHost.dll, 300
+module=SDL3.dll, -15
+module=steamnetworkingsockets.dll, -1
+module=embree3.dll, -1
+module=phonon.dll, -1
+module=video64.dll, -15
+module=nvwgf2umx.dll, -15, tid=last
+
+[FortniteClient-Win64-Shipping]
+description=*GameInput (LGI)*, -15
+description=*GameInput (Dispatcher)*, -15
+description=*AudioMixerNullCallbackThread*, -15
+description=*CrashReportingThread*, 300
+description=*GameThread*, -1
+description=*RHIInterruptThread*, -15
+description=*RHISubmissionThread*, -15
+description=*RHIThread*, -15
+description=*IoService*, -15
+description=*FHeartBeatThread*, -15
+description=*ThreadedTickWebSocketThread*, -15
+description=*LibwebsocketsThread*, -15
+description=*WindowsRawInputThread*, -15
+description=*Background Worker #2*, -15
+description=*Foreground Worker (Standby #1)*, -15
+description=*Foreground Worker (Standby #2)*, -15
+description=*Foreground Worker #0*, -15
+description=*Foreground Worker #1*, -15
+description=*Electra audio segment loader*, -15
+description=*HttpManagerThread*, -15
+description=*ElectraHTTPStream*, -15
+description=*OnlineAsyncTaskThreadMcp DefaultInstance*, -15
+description=*RenderThread 0*, -1
+
+[spotify]
+module=libcef.dll, -1
+module=spotify.exe, -1
+
+[discord]
+description=*ThreadPoolForegroundWorker*, -15
+description=*libuv-worker*, -15
+description=*MemoryInfra*, -15
+description=*CacheThread_BlockFile*, -15
+description=*BrokerEvent*, -15
+description=*LoaderLockSampler*, -15
+description=*CrashpadMainThread*, -15
+description=*ExitCodeWatcherThread*, -15
+description=*ThreadPoolSingleThreadCOMSTASharedForegroundBlocking4*, -15
+description=*ThreadPoolSingleThreadCOMSTASharedBackgroundBlocking0*, -15
+description=*ThreadPoolSingleThreadForegroundBlocking2*, -15
+description=*ThreadPoolSingleThreadSharedForeground3*, -15
+description=*ThreadPoolSingleThreadSharedBackgroundBlocking6*, -15
+description=*VideoCaptureThread*, -15
+description=*CrBrowserMain*, -1
+module=Discord.exe, -1, disableboost
+module=mswsock.dll, -15
+module=nvwgf2umx.dll, -15
+module=discord_voice.node, -1
+module=discord_utils.node, -1
+module=discord_cloudsync.node, 300
+module=discord_dispatch.node, 300
+module=discord_game_utils.node, 300
+module=discord_desktop_overlay.node, -15
+module=discord_krisp.node, -1
+module=updater.node, -15
+module=discord_media.node, 300
+module=MsSpellCheckingFacility.dll, 300
+module=wininet.dll, -15
+module=vk_swiftshader.dll, -15
+module=graphics-hook64.dll, -15
+module=libGLESv2.dll, -1
+module=nvoglv64.dll, 300
+module=combase.dll, -15
+
+[steam]
+module=InputHost.dll, 300
+module=steam.exe, -1
+module=steamservice.dll, -1
+module=steamclient.dll, 300
+module=ntdll.dll, -1
+module=tier0_s64.dll, 0
+
+[steamwebhelper]
+module=steamwebhelper.exe, -1
+module=libcef.dll, -1
+module=mswsock.dll, 300
+module=msmpeg2vdec.dll, -15
+module=ntdll.dll, -15
+module=nvoglv64.dll, 300
+
+[nvcontainer]
+module=nvcontainer.exe, 300
+module=NvPluginWatchdog.dll, 300
+module=NvTelemetry64.dll, 300
+module=NvXDCore.dll, 300
+module=_nvspserviceplugin64.dll, 300
+module=NvTelemetryAPI64.dll, 300
+module=NvUI.dll, 300
+module=nvxdapix.dll, 300
+module=mswsock.dll, 200
+module=nvapi64.dll, 200
+module=nvxdsyncplugin.dll, 300
+module=ipccommon64.dll, 300
+module=nvxdsyncplugin.dll, 300
+module=combase.dll, -15
+module=NvMessageBus.dll, -15
+module=NvMessageBusBroadcast.dll, -15
+module=ucrtbase.dll, -15
+module=NvBackend64.dll, -15
+module=ntdll.dll, -15
+
+[NVDisplay.Container]
+module=combase.dll, -15
+module=nvapi64.dll, 300
+module=NvTelemetryAPI64.dll, 300
+module=NVDisplay.Container.exe, -15
+module=NvcDispWatchdog.dll, 300
+module=nvxdsyncplugin.dll, 300
+module=wksServicePlugin.dll, 300
+module=_NvGSTPlugin.dll, 300
+module=_nvtopps.dll, 300
+module=NvXDCore.dll, 300
+module=NvMessageBus.dll, 300
+module=_NvMsgBusBroadcast.dll, 300
+module=_dbgeng.dll, 300
+module=dbgeng.dll, 300
+module=nvxdapix.dll, 300
+module=DispBroker.dll, 300
+module=nvui.dll, 300
+module=nvsvc64.dll, 300
+module=nvprofileupdaterplugin.dll, 300
+module=_DisplayDriverRAS.dll, 300
+module=ntdll.dll, -15
+
+[dwm]
+description=*DWM Kernel Sensor*, -15, disableboost
+description=*DWM Master Input*, -15, disableboost
+description=*DWM Token Thread*, -15, disableboost
+description=*DWM LPC Port Thread*, -15, disableboost
+description=*DWM Compositor Thread*, -15, disableboost
+description=*DWM Manipulation Thread*, -15, disableboost
+module=nvwgf2umx.dll, -15, tid=last
+module=dwmcore.dll, -15, disableboost
+module=GameInput.dll, 200
+module=ntdll.dll, -15, disableboost
+module=ISM.dll, -15
+module=Windows.Gaming.Input.dll, 300
+module=dwmredir.dll, -15, disableboost
+module=DispBroker.dll, -15, disableboost
+module=uDWM.dll, -15
+
+[searchapp]
+module=edgehtml.dll, -15
+module=Windows.UI.Xaml.dll, -1
+module=nvwgf2umx.dll, -15
+module=msvcrt.dll, -15
+
+[winlogon]
+module=winlogon.exe, -15
+module=ntdll.dll, -15
+
+[audiodg]
+module=audiodg.exe, -1, tid=0
+module=RltkAPOU64.dll, -1
+module=combase.dll, -15
+
+[svchost]
+module=qwave.dll, 0
+module=sechost.dll, -15
+module=CoreMessaging.dll, 0
+module=ntdll.dll, -15
+module=svchost.exe, -15
+module=wevtsvc.dll, -15
+module=winmm.dll, 0
+module=sysmain.dll, 0
+module=PsmServiceExtHost.dll, -15
+module=esent.dll, -15
+
+[sihost]
+module=ActivationManager.dll, -15, disableboost
+module=combase.dll, -15, disableboost
+module=modernexecserver.dll, -15, disableboost
+module=sihost.exe, -15, disableboost
+
+[taskhostw]
+module=winmm.dll, -15
+module=taskhostw.exe, -15
+
+[csrss]
+module=winsrvext*, -15, disableboost
+module=csrsrv*, -15, disableboost
+module=cdd.dll, -15, disableboost
+
+[dllhost]
+module=esent.dll, -15
+
+[startmenuexperiencehost]
+module=Windows.UI.Xaml.dll, 0
+
+[shellexperiencehost]
+module=Windows.UI.Xaml.dll, 0
+
+[textinputhost]
+module=Windows.UI.Xaml.dll, 0
+module=directmanipulation.dll, 0
+module=TextInputHost.exe, -15
+module=SHCore.dll, -15
+module=nvwgf2umx.dll, -15
+module=MrmCoreR.dll, -15
+
+[conhost]
+module=conhost.exe, -15
+
+[explorer]
+module=Windows.Gaming.Input.dll, 300
+module=Windows.UI.Xaml.dll, -15, disableboost
+module=windows.immersiveshell.serviceprovider.dll, -15, disableboost
+module=dwmcorei.dll, -1, disableboost
+module=CoreMessagingXP.dll, -15
+module=nvwgf2umx.dll, -15
+module=SHCore*, -15, disableboost
+module=ntdll.dll, -1, disableboost
+module=sppc.dll, 300
+module=dxgi.dll, -15
+module=wlidprov.dll, -15
+module=CoreMessaging.dll, -15
+module=GdiPlus.dll, -15
+module=SndVolSSO.dll, -15
+module=MsSpellCheckingFacility.dll, 300
+module=twinui.pcshell.dll, -15
+module=InputHost.dll, 300
+
+[ctfmon]
+module=ctfmon.exe, -15
+module=InputHost.dll, -15, disableboost
+module=InputService.dll, -15, disableboost
+module=msctf.dll, -15
+module=combase.dll, -15, disableboost
+module=MTFServer.dll, -15
+module=ntdll.dll, -15, disableboost
+module=MsCtfMonitor.dll, 300
+
+[ayugram]
+module=ayugram.exe, -1
+module=winmm.dll, 0
+module=nvwgf2umx.dll, -15
+module=mswsock.dll, -15
+module=MsSpellCheckingFacility.dll, 300
+module=wininet.dll, -15
+module=directmanipulation.dll, -1
+module=GdiPlus.dll, -15
+
+[lightshot]
+module=SHCore.dll, 300
+module=combase.dll, 300
+module=wininet.dll, 300
+module=GdiPlus.dll, 300
+module=crypt32.dll, 300
+module=Lightshot.exe, -15
+module=ntdll.dll, -15
+
+[winws]
+module=winws.exe, -15
+module=cygwin1.dll, -1
+module=sechost.dll, -15
+module=ntdll.dll, -15
+
+[warp-svc]
+module=mswsock.dll, -1
+module=warp-svc.exe, -15
+module=combase.dll, -15
+module=sechost.dll, -15
+
+[Cloudflare WARP]
+module=warp_ipc.dll, -15
+module=GdiPlus.dll, -15
+module=nvd3dumx.dll, 300
+
+[aerialtool_threads]
+module=AerialTool_Threads.exe, -15
+module=ntdll.dll, -15
+module=combase.dll, -15
+module=GdiPlus.dll, -15
+module=SHCore.dll, -15
