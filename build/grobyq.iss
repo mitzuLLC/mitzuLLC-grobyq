@@ -22,6 +22,8 @@ Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
+; a running grobyq (tray) is detected: setup / uninstall ask to exit it first (it restores every change on exit)
+AppMutex=Global\grobyq-mitzu
 
 [Files]
 Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
@@ -32,3 +34,7 @@ Name: "{autodesktop}\grobyq"; Filename: "{app}\grobyq.exe"
 
 [Run]
 Filename: "{app}\grobyq.exe"; Description: "Launch grobyq"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; the "Start with Windows" logon task points at this folder: it goes with the app
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""grobyq-mitzu"" /F"; Flags: runhidden; RunOnceId: "DelLogonTask"

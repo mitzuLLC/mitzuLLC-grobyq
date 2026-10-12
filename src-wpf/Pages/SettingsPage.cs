@@ -45,7 +45,6 @@ namespace Grobyq.Pages
             // ---- B. startup and window: one toggle pattern, control on the title line ----
             Section(L.T("Startup and window"), false);
             var bc = Card();
-            bc.Add(ToggleRow(L.T("Enable at start"), L.T("Start armed: the optimizer waits for a target as soon as grobyq opens."), "AutoEnable"));
             bc.Add(ToggleRow(L.T("Close to tray"), L.T("The window close button hides grobyq to the tray instead of exiting (exit from the tray menu)."), "CloseToTray"));
             bc.Add(ToggleRow(L.T("Restore Windows defaults on exit"), L.T("On exit every process and thread grobyq changed goes back to its captured baseline, the optimizer on or off (manual Live threads edits included). Off = changes stay until a reboot or DISABLE."), "RestoreOnExit"));
             _auto = Ui.Switch(false);
@@ -181,6 +180,8 @@ namespace Grobyq.Pages
         {
             if (!Dlg.Ask(null, L.T("Reset all grobyq settings to the first-run defaults? Presets, backups and the license stay."), true)) return;
             string lang = L.Code;
+            var o = Optimizer.Instance;
+            if (o != null) o.StopAll();                    // the switches go off with the settings: every baseline back first
             try
             {
                 Registry.CurrentUser.DeleteSubKeyTree(@"Software\grobyq", false);

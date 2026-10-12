@@ -34,6 +34,8 @@ namespace Grobyq
         public bool DoAffRules = true;
         public bool DoProcess = true;           // game process: class / I/O / memory priority / EcoQoS / boost
         public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
+        public bool Game = true;                // the game threads optimizer is on: targets, affinity rules, the user's background list
+        public bool Sys = false;                // the system threads optimizer is on: the built-in profile + its background list
     }
 
     public sealed class Engine
@@ -228,7 +230,7 @@ namespace Grobyq
 
         private void Forget(int pid)
         {
-            _procBefore.Remove(pid); _appliedGame.Remove(pid); _appliedBg.Remove(pid); _modCache.Remove(pid); _born.Remove(pid); _presetTidCount.Remove(pid);
+            _procBefore.Remove(pid); _appliedGame.Remove(pid); _appliedBg.Remove(pid); _sysPids.Remove(pid); _modCache.Remove(pid); _born.Remove(pid); _presetTidCount.Remove(pid);
             string pre = pid + ":";
             foreach (var k in _thrBefore.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrBefore.Remove(k);
             foreach (var k in _thrMeta.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrMeta.Remove(k);
@@ -720,13 +722,14 @@ namespace Grobyq
         }
 
         // ---------------- background layer ----------------
-        public List<string> BgApply(bool bgAffinity, string maskName) { lock (_gate) return BgApplyCore(bgAffinity, maskName); }
-        private List<string> BgApplyCore(bool bgAffinity, string maskName)
+        // user = the user's background list (game optimizer), sys = the built-in profile's list (system optimizer): one pass,
+        // one baseline per process even when a process is on both lists.
+        public List<string> BgApply(bool bgAffinity, string maskName, bool user, bool sys) { lock (_gate) return BgApplyCore(bgAffinity, maskName, user, sys); }
+        private List<string> BgApplyCore(bool bgAffinity, string maskName, bool user, bool sys)
         {
             var log = new List<string>();
             if (Targets == null) return log;
-            // the user's background list + the built-in profile's list (System thread optimization), one pass
-            var list = Settings.BgProcs().Concat(SystemBg.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var list = (user ? Settings.BgProcs() : new string[0]).Concat(sys ? SystemBg.Keys.ToArray() : new string[0]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (list.Length == 0) return log;
 
             Topo topo = Topo.Live();
@@ -848,30 +851,71 @@ namespace Grobyq
             {
                 if (RunningCount(t) == 0) continue;
                 found.Add(t);
+                if (!o.Game) continue;                        // system optimizer only: games are detected, never touched
                 var report = new ApplyReport();
                 foreach (var l in Apply(t, o, report)) log.Add(l);
                 LastReports.Add(report);
             }
             LiveTarget = string.Join(", ", found);
 
-            if (o.DoAffRules) foreach (var l in ApplyAffRules()) log.Add(l);
-            if (Settings.GetBool("ApplyAllPresets") || SystemPresets.Count > 0) foreach (var l in ApplyImportedPresets(o)) log.Add(l);
+            if (o.Game && o.DoAffRules) foreach (var l in ApplyAffRules()) log.Add(l);
+            if ((o.Game && Settings.GetBool("ApplyAllPresets")) || (o.Sys && SystemPresets.Count > 0)) foreach (var l in ApplyImportedPresets(o)) log.Add(l);
+            UpdateSysStats();
 
             if (found.Count == 0)
             {
                 if (BgOn) foreach (var l in BgRelease()) log.Add(l);
-                log.Add("[--] no target running - armed and waiting");
+                if (o.Game) log.Add("[--] no game running - armed and waiting");
                 return log;
             }
 
-            if (o.DoBackground)
+            // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer);
+            // the profile's list only while the game has focus, the user's list as "Release background on alt-tab" says
+            bool userBg = o.Game && o.DoBackground, sysBg = o.Sys && SystemBg.Count > 0;
+            if (userBg || sysBg)
             {
-                bool wantBg = o.BgForeground ? GameForeground() : true;
-                if (wantBg) foreach (var l in BgApply(o.BgAffinity, o.BgMaskName ?? o.MaskName)) log.Add(l);
+                bool wantBg = (!userBg || o.BgForeground) ? GameForeground() : true;
+                if (wantBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
                 else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
             }
             else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
             return log;
+        }
+
+        // The system threads optimizer on its own (every 10 s, and when no game runs): the built-in profile only.
+        public List<string> ApplySystemLayer()
+        {
+            lock (_gate)
+            {
+                var log = new List<string>();
+                if (SystemPresets == null || SystemPresets.Count == 0) { UpdateSysStats(); return log; }
+                _tidCache = Native.AllThreadIdsByPid();
+                try
+                {
+                    Native.EnableDebugPrivilege();
+                    ApplySet(SystemPresets, new HashSet<string>(Targets ?? new string[0], StringComparer.OrdinalIgnoreCase), log, "sys:");
+                }
+                finally { _tidCache = null; }
+                UpdateSysStats();
+                return log;
+            }
+        }
+
+        // What the system optimizer holds right now (processes / threads with a recorded baseline): the Threads page and
+        // the tray read these without taking the engine lock.
+        private readonly HashSet<int> _sysPids = new HashSet<int>();
+        public int SysProcCount { get; private set; }
+        public int SysThreadCount { get; private set; }
+        private void UpdateSysStats()
+        {
+            int procs = 0, thr = 0;
+            foreach (int pid in _sysPids) if (_procBefore.ContainsKey(pid) || _appliedGame.Contains(pid)) procs++;
+            foreach (var k in _thrBefore.Keys)
+            {
+                int c = k.IndexOf(':'), pid;
+                if (c > 0 && int.TryParse(k.Substring(0, c), out pid) && _sysPids.Contains(pid)) thr++;
+            }
+            SysProcCount = procs; SysThreadCount = thr;
         }
 
         // ---------------- revert (spec F7) ----------------
@@ -1030,14 +1074,14 @@ namespace Grobyq
             var log = new List<string>();
             var targets = new HashSet<string>(Targets ?? new string[0], StringComparer.OrdinalIgnoreCase);
             Native.EnableDebugPrivilege();
-            if (Settings.GetBool("ApplyAllPresets") && Presets != null) ApplySet(Presets, targets, log, "");
-            if (SystemPresets != null && SystemPresets.Count > 0) ApplySet(SystemPresets, targets, log, "sys:");
+            if (o.Game && Settings.GetBool("ApplyAllPresets") && Presets != null) ApplySet(Presets, targets, log, "");
+            if (o.Sys && SystemPresets != null && SystemPresets.Count > 0) ApplySet(SystemPresets, targets, log, "sys:");
             return log;
         }
 
         private void ApplySet(Dictionary<string, Preset> set, HashSet<string> targets, List<string> log, string tag)
         {
-            bool adv = AdvancedThreadMode;
+            bool adv = AdvancedThreadMode, sys = tag == "sys:";
             foreach (var kv in set)
             {
                 string exe = kv.Key;
@@ -1054,7 +1098,7 @@ namespace Grobyq
                     {
                         int pid = p.Id;
                         // ProcessBoost is a cheap, idempotent process attribute (it early-returns when already set) - leave it per cycle.
-                        if (procBoost) ProcessBoost(pid, string.Equals(preset.Boost, "Off", StringComparison.OrdinalIgnoreCase), log);
+                        if (procBoost && ProcessBoost(pid, string.Equals(preset.Boost, "Off", StringComparison.OrdinalIgnoreCase), log) && sys) _sysPids.Add(pid);
                         // Lever 3: the per-thread pass (Snapshot + SetThreadPriority) is the expensive part. Run it only when
                         // this PID is new or grew a thread since last cycle - background apps (chrome/steam) keep their priorities
                         // once set, so re-walking them every tick was pure cost. A changed count (incl. PID reuse) re-applies.
@@ -1062,7 +1106,9 @@ namespace Grobyq
                         int prev;
                         if (cur < 0 || !_presetTidCount.TryGetValue(pid, out prev) || prev != cur)
                         {
-                            foreach (var l in ApplyPriorityPreset(pid, preset, adv)) log.Add(l);
+                            int hits;
+                            foreach (var l in ApplyPriorityPreset(pid, preset, adv, sys, out hits)) log.Add(l);
+                            if (hits > 0 && sys) _sysPids.Add(pid);
                             if (cur >= 0) _presetTidCount[pid] = cur;
                         }
                     }
@@ -1073,11 +1119,12 @@ namespace Grobyq
 
         // [DISABLEBOOST] / preset boost for a non-target process: SetProcessPriorityBoost only (a priority attribute),
         // baseline captured, restored by DISABLE.
-        private void ProcessBoost(int pid, bool off, List<string> log)
+        // true = grobyq holds a boost baseline for this process (set now or earlier)
+        private bool ProcessBoost(int pid, bool off, List<string> log)
         {
             int lvl, err;
             IntPtr hp = Native.OpenProcessGraceful((uint)pid, out lvl, out err);
-            if (hp == IntPtr.Zero) return;
+            if (hp == IntPtr.Zero) return false;
             try
             {
                 Identity(pid, hp);
@@ -1085,16 +1132,18 @@ namespace Grobyq
                 Debug.Assert(_procBefore[pid].Have, "process baseline must be captured before any set");
                 var b = _procBefore[pid];
                 bool was; Native.GetProcessPriorityBoost(hp, out was);
-                if (was == off) return;
+                if (was == off) return b.Boost;
                 b.Boost = true;
                 _appliedGame.Add(pid);
                 if (Native.SetProcessPriorityBoost(hp, off)) AdviceOnce(log, "pboost:" + pid + off, string.Format("[TH] PID {0}: process priority boost {1}", pid, off ? "off" : "on"));
+                return true;
             }
             finally { Native.CloseHandle(hp); }
         }
 
-        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool adv)
+        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool adv, bool sys, out int hits)
         {
+            hits = 0;
             bool prot = IsProtected(preset.Exe);
             var log = new List<string>();
             var snap = Snapshot(pid);
@@ -1125,7 +1174,8 @@ namespace Grobyq
                     finally { Native.CloseHandle(ht); }
                 }
             }
-            if (hitN > 0) log.Add(string.Format("[TH] {0} PID {1}: {2} thread(s) set by imported preset (priority only)", preset.Exe, pid, hitN));
+            if (hitN > 0) log.Add(string.Format("[TH] {0} PID {1}: {2} thread(s) set by {3} (priority only)", preset.Exe, pid, hitN, sys ? "the system profile" : "its preset"));
+            hits = hitN;
             return log;
         }
 
@@ -1236,8 +1286,9 @@ namespace Grobyq
                 try { if (RestoreProc(hp, id, fallback)) log.Add(string.Format("[OFF] PID {0} -> restored what grobyq changed (class / I/O / memory / cores / EcoQoS / boost) to its baseline", id)); }
                 catch { } finally { Native.CloseHandle(hp); }
             }
-            _appliedGame.Clear(); _appliedBg.Clear();
+            _appliedGame.Clear(); _appliedBg.Clear(); _sysPids.Clear();
             _procBefore.Clear(); _thrBefore.Clear(); _born.Clear();
+            SysProcCount = 0; SysThreadCount = 0;
             _presetTidCount.Clear();   // Lever-3 guard: a disable must force the next enable to re-apply imported presets
             BgOn = false; LastThreads = 0; LastBg = 0; LiveTarget = "";
             log.Add("[i] Thread Ideal Processor is only a hint; a full thread-layer reset = restart the game. Harmless to leave.");
@@ -1255,6 +1306,7 @@ namespace Grobyq
             foreach (var k in _modCache.Keys.ToList()) if (!alive.Contains(k)) _modCache.Remove(k);
             foreach (var k in _appliedGame.ToList()) if (!alive.Contains(k)) _appliedGame.Remove(k);
             foreach (var k in _appliedBg.ToList()) if (!alive.Contains(k)) _appliedBg.Remove(k);
+            foreach (var k in _sysPids.ToList()) if (!alive.Contains(k)) _sysPids.Remove(k);
             foreach (var k in _procBefore.Keys.ToList()) if (!alive.Contains(k)) _procBefore.Remove(k);
             foreach (var k in _born.Keys.ToList()) if (!alive.Contains(k)) _born.Remove(k);
             foreach (var k in _presetTidCount.Keys.ToList()) if (!alive.Contains(k)) _presetTidCount.Remove(k);

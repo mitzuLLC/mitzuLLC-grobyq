@@ -54,7 +54,9 @@ namespace Grobyq
             _tray = new Tray();
             _tray.OpenRequested += ShowPanel;
             _tray.DoubleClicked += () => { if (IsVisible && WindowState != WindowState.Minimized) Hide(); else ShowPanel(); };
-            _tray.ToggleRequested += () => { var o = Optimizer.Instance; if (o != null) o.SetActive(!o.Active); };
+            _tray.GameToggled += on => OptUi.Game(on);
+            _tray.SystemToggled += on => { if (!OptUi.System(on, null)) OnState(); };    // declined = the menu shows the real state
+            _tray.AboutRequested += () => { ShowPanel(); Navigate("about"); };
             _tray.ExitRequested += ExitFromTray;
 
             BuildSidebar();
@@ -114,8 +116,8 @@ namespace Grobyq
                     t.VCacheLlc.HasValue ? "  V-Cache = domain " + t.LLCGroups.IndexOf(t.VCacheLlc.Value) : ""));
             }
             catch (Exception ex) { AppLog.Add("[!!] topology: " + ex.Message); }
-            if (!Settings.GetBool("AutoEnable"))
-                AppLog.Add("[i] manual mode: nothing is changed until you press ENABLE on Threads");
+            if (!Settings.GetBool("GameOpt") && !Settings.GetBool("SystemThreadOpt") && !Settings.GetBool("AutoEnable"))
+                AppLog.Add("[i] manual mode: nothing is changed until you switch an optimizer on (Threads or the tray menu)");
         }
 
         // ------------------------------------------------------------------ sidebar
@@ -209,7 +211,7 @@ namespace Grobyq
             if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke((Action)OnState); return; }
             var o = Optimizer.Instance;
             if (o == null) return;
-            try { _tray.SetState(o.StateName, o.LiveTarget, o.Active); } catch { }
+            try { _tray.SetState(o.StateName, o.LiveTarget, o.GameOn, o.SysOn); } catch { }
         }
 
         public void ShowPanel()

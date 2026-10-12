@@ -258,6 +258,8 @@ namespace Grobyq
             });
             chk("splash", () => { var d = SplashData.Load(); return d != null && d.Frames.Count > 10 && SplashData.Decode(d.Frames[0]).PixelWidth > 0; });
             chk("gate windows", () => { L.Load("ru"); return LicenseWindow.Builds() && AerialOnlyWindow.Builds(); });
+            chk("tray menu", () => { L.Load("ru"); var m = new TrayMenu(); m.Sync("ARMED", "", true, false); return m.Content != null; });
+            chk("system profile", () => { var r = ThreadIni.LoadBundled(); log.Add("      system profile: " + r.Presets.Count + " processes, " + r.BgClasses.Count + " background"); return r.Presets.Count > 10 && r.BgClasses.Count > 5; });
             chk("pages", () =>
             {
                 L.Load("ru");

@@ -131,6 +131,10 @@ namespace Grobyq
                 case "bolt-dot":
                     Dot(4, 4, 8, 8);
                     break;
+                case "power":
+                    OpenRing(8, 8.7, 5.6, 40);
+                    Ln(8, 1.8, 8, 7.4);
+                    break;
                 default:
                     Ring(3, 3, 10, 10);
                     break;
@@ -152,6 +156,20 @@ namespace Grobyq
             {
                 c.BeginFigure(new Point(xy[0], xy[1]), false, closed);
                 for (int i = 2; i + 1 < xy.Length; i += 2) c.LineTo(new Point(xy[i], xy[i + 1]), true, true);
+            }
+            g.Freeze();
+            _dc.DrawGeometry(null, _pen, g);
+        }
+
+        // a circle open at the top by +-gapDeg (the power glyph)
+        private void OpenRing(double cx, double cy, double r, double gapDeg)
+        {
+            double a1 = (-90 + gapDeg) * Math.PI / 180, a2 = (-90 - gapDeg) * Math.PI / 180;
+            var g = new StreamGeometry();
+            using (var c = g.Open())
+            {
+                c.BeginFigure(new Point(cx + r * Math.Cos(a1), cy + r * Math.Sin(a1)), false, false);
+                c.ArcTo(new Point(cx + r * Math.Cos(a2), cy + r * Math.Sin(a2)), new Size(r, r), 0, true, SweepDirection.Clockwise, true, true);
             }
             g.Freeze();
             _dc.DrawGeometry(null, _pen, g);

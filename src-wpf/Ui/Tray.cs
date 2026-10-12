@@ -2,108 +2,84 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
 using SD = System.Drawing;
 using SD2 = System.Drawing.Drawing2D;
 using WF = System.Windows.Forms;
 
 namespace Grobyq
 {
-    // Tray icon: the logo tile + a state dot (red = off, amber = armed, green = active), and the card-style dark menu of
-    // the WinForms build (Open, Thread optimizer active, Exit). WPF has no tray control; the WinForms NotifyIcon runs on
-    // the WPF dispatcher's message pump, so its events arrive on the UI thread.
+    // Tray icon: the logo tile + a state dot (red = off, amber = armed, green = active). Right click opens TrayMenu, a
+    // small WPF card in the app's own style (the WinForms context menu drew its check mark outside the menu and could
+    // not hold switches). WPF has no tray control; the WinForms NotifyIcon runs on the WPF dispatcher's message pump,
+    // so its events arrive on the UI thread.
     public sealed class Tray : IDisposable
     {
         private readonly WF.NotifyIcon _icon;
-        private WF.ToolStripMenuItem _miActive;
         private readonly Dictionary<int, SD.Icon> _cache = new Dictionary<int, SD.Icon>();
-        private static float _k = -1f;
+        private TrayMenu _menu;
+        private string _state = "OFF", _live = "";
+        private bool _game, _sys;
 
-        public event Action OpenRequested, ToggleRequested, ExitRequested, DoubleClicked;
+        public event Action OpenRequested, AboutRequested, ExitRequested, DoubleClicked;
+        public event Action<bool> GameToggled, SystemToggled;
 
-        internal static readonly SD.Color CCard = SD.Color.FromArgb(16, 16, 20);
-        internal static readonly SD.Color CCardHi = SD.Color.FromArgb(22, 22, 27);
-        internal static readonly SD.Color CLine = SD.Color.FromArgb(28, 28, 34);
-        internal static readonly SD.Color CFg = SD.Color.FromArgb(237, 237, 237);
-        internal static readonly SD.Color CFaint = SD.Color.FromArgb(92, 92, 102);
         private static readonly SD.Color COk = SD.Color.FromArgb(76, 214, 138);
         private static readonly SD.Color CWarn = SD.Color.FromArgb(232, 180, 72);
         private static readonly SD.Color CBad = SD.Color.FromArgb(224, 90, 90);
-
-        // DPI factor for the WinForms menu (pixel paddings); fonts in points scale on their own.
-        internal static float K
-        {
-            get
-            {
-                if (_k > 0) return _k;
-                _k = 1f;
-                try { using (var g = SD.Graphics.FromHwnd(IntPtr.Zero)) _k = Math.Max(1f, g.DpiX / 96f); } catch { }
-                return _k;
-            }
-        }
-        internal static int D(int v) { return (int)Math.Round(v * K); }
 
         public Tray()
         {
             _icon = new WF.NotifyIcon { Text = Brand.Name };
             _icon.Icon = Make(CBad);
-            _icon.DoubleClick += (s, e) => { var h = DoubleClicked; if (h != null) h(); };
-            BuildMenu();
+            _icon.DoubleClick += (s, e) => { if (_menu != null) _menu.Hide(); var h = DoubleClicked; if (h != null) h(); };
+            _icon.MouseUp += (s, e) => { if (e.Button == WF.MouseButtons.Right) ShowMenu(); };
             _icon.Visible = true;
         }
 
-        // Rebuilt after a language switch.
+        // Rebuilt after a language switch (the next right click builds it in the new language).
         public void BuildMenu()
         {
-            var old = _icon.ContextMenuStrip;
-            var m = new WF.ContextMenuStrip
-            {
-                Font = new SD.Font(L.Family, 9.75f),
-                ShowImageMargin = false,
-                ShowCheckMargin = true,
-                BackColor = CCard,
-                ForeColor = CFg,
-                Renderer = new TrayRenderer(),
-                Padding = new WF.Padding(D(4), D(6), D(4), D(6)),
-                DropShadowEnabled = true
-            };
-            m.HandleCreated += (s, e) =>
-            {
-                try
-                {
-                    int round = 3; DwmSetWindowAttribute(m.Handle, 33, ref round, 4);                         // DWMWCP_ROUNDSMALL (Win11)
-                    int brd = CLine.R | (CLine.G << 8) | (CLine.B << 16); DwmSetWindowAttribute(m.Handle, 34, ref brd, 4);
-                }
-                catch { }
-            };
-            m.Items.Add(Item(L.T("Open grobyq"), (s, e) => { var h = OpenRequested; if (h != null) h(); }));
-            m.Items.Add(new WF.ToolStripSeparator());
-            bool was = _miActive != null && _miActive.Checked;
-            _miActive = Item(L.T("Thread optimizer active"), (s, e) => { var h = ToggleRequested; if (h != null) h(); });
-            _miActive.Checked = was;
-            m.Items.Add(_miActive);
-            m.Items.Add(new WF.ToolStripSeparator());
-            m.Items.Add(Item(L.T("Exit"), (s, e) => { var h = ExitRequested; if (h != null) h(); }));
-            _icon.ContextMenuStrip = m;
-            if (old != null) { try { old.Dispose(); } catch { } }
+            var old = _menu;
+            _menu = null;
+            if (old != null) { try { old.Close(); } catch { } }
         }
 
-        private static WF.ToolStripMenuItem Item(string text, EventHandler click)
+        private void ShowMenu()
         {
-            var i = new WF.ToolStripMenuItem(text) { ForeColor = CFg, Padding = new WF.Padding(D(4), D(7), D(18), D(7)) };
-            i.Click += click;
-            return i;
+            if (_menu == null)
+            {
+                _menu = new TrayMenu();
+                _menu.OpenClicked += () => Fire(OpenRequested);
+                _menu.AboutClicked += () => Fire(AboutRequested);
+                _menu.ExitClicked += () => Fire(ExitRequested);
+                _menu.GameChanged += v => { var h = GameToggled; if (h != null) h(v); };
+                _menu.SystemChanged += v => { var h = SystemToggled; if (h != null) h(v); };
+            }
+            _menu.Sync(_state, _live, _game, _sys);
+            _menu.ShowAt(WF.Control.MousePosition);
         }
 
-        // state: OFF / ARMED / ACTIVE
-        public void SetState(string state, string live, bool active)
+        private void Fire(Action a)
         {
-            SD.Color c = state == "ACTIVE" ? COk : state == "ARMED" ? CWarn : CBad;
+            if (_menu != null) _menu.Hide();
+            if (a != null) a();
+        }
+
+        // state: OFF / ARMED / ACTIVE; game / sys = the two optimizer switches
+        public void SetState(string state, string live, bool game, bool sys)
+        {
+            _state = state ?? "OFF"; _live = live ?? ""; _game = game; _sys = sys;
+            SD.Color c = _state == "ACTIVE" ? COk : _state == "ARMED" ? CWarn : CBad;
             try { _icon.Icon = Make(c); } catch { }
-            string text = state == "ACTIVE" ? Brand.Name + " - " + L.T("ACTIVE") + ": " + live
-                        : state == "ARMED" ? Brand.Name + " - " + L.T("armed, waiting for a game")
-                        : Brand.Name + " - " + L.T("off");
+            string text = Brand.Name + " - " + TrayMenu.StateText(_state) + (_live.Length > 0 ? ": " + _live : "");
             try { _icon.Text = text.Length > 63 ? text.Substring(0, 60) + "..." : text; } catch { }
-            if (_miActive != null) _miActive.Checked = active;
+            if (_menu != null && _menu.IsVisible) _menu.Sync(_state, _live, _game, _sys);
         }
 
         public void Balloon(string text)
@@ -113,8 +89,8 @@ namespace Grobyq
 
         public void Dispose()
         {
+            try { if (_menu != null) _menu.Close(); } catch { }
             try { _icon.Visible = false; } catch { }
-            try { var m = _icon.ContextMenuStrip; _icon.ContextMenuStrip = null; if (m != null) m.Dispose(); } catch { }
             try { _icon.Dispose(); } catch { }
         }
 
@@ -158,58 +134,205 @@ namespace Grobyq
             }
             catch { return null; }
         }
-
-        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
-
-        internal static SD2.GraphicsPath Round(SD.RectangleF r, float rad)
-        {
-            var p = new SD2.GraphicsPath();
-            float d = Math.Max(1f, Math.Min(rad * 2, Math.Min(r.Width, r.Height)));
-            p.AddArc(r.X, r.Y, d, d, 180, 90);
-            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            p.CloseFigure();
-            return p;
-        }
     }
 
-    // Card-style menu: #101014 fill, hairline, rounded hover, a check for the armed optimizer.
-    internal sealed class TrayRenderer : WF.ToolStripRenderer
+    // The tray menu card: a header (state; click = open the panel), the two optimizer switches (the Settings switch, the
+    // whole row toggles), About and Exit. Equal rows, the app font, closes on a click elsewhere or Esc.
+    internal sealed class TrayMenu : Window
     {
-        protected override void OnRenderToolStripBackground(WF.ToolStripRenderEventArgs e)
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT r);
+        [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private const uint SWP_NOSIZE = 0x0001, SWP_NOACTIVATE = 0x0010;
+        private const double Shadow = 10;              // transparent margin around the card for its shadow (DIP)
+
+        private readonly Ellipse _dot;
+        private readonly TextBlock _state, _sub;
+        private readonly CheckBox _game, _sys;
+        private SD.Point _anchor;
+
+        public event Action OpenClicked, AboutClicked, ExitClicked;
+        public event Action<bool> GameChanged, SystemChanged;
+
+        public static string StateText(string st)
         {
-            using (var b = new SD.SolidBrush(Tray.CCard)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+            return st == "ACTIVE" ? L.T("ACTIVE") : st == "ARMED" ? L.T("ARMED") : L.T("OFF");
         }
-        protected override void OnRenderToolStripBorder(WF.ToolStripRenderEventArgs e)
+
+        public TrayMenu()
         {
-            var r = e.ToolStrip.ClientRectangle;
-            using (var p = new SD.Pen(Tray.CLine)) e.Graphics.DrawRectangle(p, 0, 0, r.Width - 1, r.Height - 1);
+            WindowStyle = WindowStyle.None;
+            AllowsTransparency = true;
+            Background = Brushes.Transparent;
+            ResizeMode = ResizeMode.NoResize;
+            ShowInTaskbar = false;
+            Topmost = true;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Title = Brand.Name;
+            FontFamily = new FontFamily(L.Family);
+            UseLayoutRounding = true;
+            TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+
+            var card = new Border
+            {
+                Width = 284,
+                Margin = new Thickness(Shadow),
+                Padding = new Thickness(5),
+                Background = Ui.B("Card"),
+                BorderBrush = Ui.B("Edge"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(9),
+                Effect = new DropShadowEffect { BlurRadius = 16, ShadowDepth = 2, Direction = 270, Opacity = 0.6, Color = Colors.Black }
+            };
+            var stack = new StackPanel();
+
+            // header: logo, name, state - the whole block opens the panel
+            var hg = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var glyph = Ui.Picture("glyph_40.png", 26);
+            glyph.VerticalAlignment = VerticalAlignment.Center;
+            glyph.Margin = new Thickness(0, 0, 10, 0);
+            hg.Children.Add(glyph);
+            var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            names.Children.Add(Ui.Semi(Brand.Name, 10, "Fg"));
+            _sub = Ui.Text("", 8.25, "Dim", false);
+            _sub.Margin = new Thickness(0, 1, 0, 0);
+            names.Children.Add(_sub);
+            Grid.SetColumn(names, 1);
+            hg.Children.Add(names);
+            var st = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+            _dot = new Ellipse { Width = 7, Height = 7, Fill = Ui.B("Bad"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 6, 0) };
+            _state = Ui.Semi("", 7.75, "Dim");
+            _state.VerticalAlignment = VerticalAlignment.Center;
+            st.Children.Add(_dot); st.Children.Add(_state);
+            Grid.SetColumn(st, 2);
+            hg.Children.Add(st);
+            stack.Children.Add(Row(hg, 50, () => { var h = OpenClicked; if (h != null) h(); }, L.T("Open grobyq")));
+            stack.Children.Add(Sep());
+
+            _game = Ui.Switch(false);
+            stack.Children.Add(SwitchRow(L.T("Game threads optimizer"), _game, v => { var h = GameChanged; if (h != null) h(v); }));
+            _sys = Ui.Switch(false);
+            stack.Children.Add(SwitchRow(L.T("System threads optimizer"), _sys, v => { var h = SystemChanged; if (h != null) h(v); }));
+            stack.Children.Add(Sep());
+
+            stack.Children.Add(ActionRow("about", L.T("About"), () => { var h = AboutClicked; if (h != null) h(); }));
+            stack.Children.Add(ActionRow("power", L.T("Exit"), () => { var h = ExitClicked; if (h != null) h(); }));
+
+            card.Child = stack;
+            Content = card;
+
+            Deactivated += (s, e) => Hide();
+            PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) { e.Handled = true; Hide(); } };
+            DpiChanged += (s, e) => { if (IsVisible) Dispatcher.BeginInvoke((Action)(() => Place())); };
         }
-        protected override void OnRenderImageMargin(WF.ToolStripRenderEventArgs e) { }
-        protected override void OnRenderMenuItemBackground(WF.ToolStripItemRenderEventArgs e)
+
+        // one even row: hover = the card highlight, click = the action
+        private static Border Row(UIElement content, double height, Action click, string tip = null)
         {
-            if (!e.Item.Selected || !e.Item.Enabled) return;
-            var g = e.Graphics; g.SmoothingMode = SD2.SmoothingMode.AntiAlias;
-            var r = new SD.RectangleF(Tray.D(2), 1, e.Item.Width - Tray.D(4), e.Item.Height - 2);
-            using (var path = Tray.Round(r, 6 * Tray.K)) using (var b = new SD.SolidBrush(Tray.CCardHi)) g.FillPath(b, path);
+            var b = new Border
+            {
+                MinHeight = height,
+                Padding = new Thickness(10, 0, 10, 0),
+                CornerRadius = new CornerRadius(6),
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                Child = content
+            };
+            if (content is FrameworkElement fe) fe.VerticalAlignment = VerticalAlignment.Center;
+            if (!string.IsNullOrEmpty(tip)) b.ToolTip = tip;
+            b.MouseEnter += (s, e) => b.Background = Ui.B("CardHi");
+            b.MouseLeave += (s, e) => b.Background = Brushes.Transparent;
+            b.MouseLeftButtonUp += (s, e) => { e.Handled = true; click(); };
+            return b;
         }
-        protected override void OnRenderItemText(WF.ToolStripItemTextRenderEventArgs e)
+
+        private static Border SwitchRow(string text, CheckBox sw, Action<bool> changed)
         {
-            e.TextColor = e.Item.Enabled ? Tray.CFg : Tray.CFaint;
-            base.OnRenderItemText(e);
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var t = Ui.Text(text, 9.5, "Fg", false);
+            t.VerticalAlignment = VerticalAlignment.Center;
+            g.Children.Add(t);
+            sw.IsHitTestVisible = false;               // the row takes the click: one toggle per click
+            sw.Focusable = false;
+            sw.VerticalAlignment = VerticalAlignment.Center;
+            sw.Margin = new Thickness(14, 0, 0, 0);
+            Grid.SetColumn(sw, 1);
+            g.Children.Add(sw);
+            return Row(g, 38, () => { bool v = sw.IsChecked != true; sw.IsChecked = v; changed(v); });
         }
-        protected override void OnRenderSeparator(WF.ToolStripSeparatorRenderEventArgs e)
+
+        private static Border ActionRow(string icon, string text, Action click)
         {
-            int y = e.Item.Height / 2;
-            using (var p = new SD.Pen(Tray.CLine)) e.Graphics.DrawLine(p, Tray.D(10), y, e.Item.Width - Tray.D(10), y);
+            var p = new StackPanel { Orientation = Orientation.Horizontal };
+            var ic = new Ico { Kind = icon, Width = 15, Height = 15, Stroke = Ui.B("Dim"), StrokeWidth = 1.4, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(1, 0, 11, 0) };
+            p.Children.Add(ic);
+            var t = Ui.Text(text, 9.5, "Fg", false);
+            t.VerticalAlignment = VerticalAlignment.Center;
+            p.Children.Add(t);
+            return Row(p, 34, click);
         }
-        protected override void OnRenderItemCheck(WF.ToolStripItemImageRenderEventArgs e)
+
+        private static Border Sep()
         {
-            var r = e.ImageRectangle; var g = e.Graphics; g.SmoothingMode = SD2.SmoothingMode.AntiAlias;
-            float cx = r.Left + r.Width / 2f, cy = r.Top + r.Height / 2f, u = Math.Min(r.Width, r.Height) / 2.4f;
-            using (var p = new SD.Pen(Tray.CFg, 1.8f * Tray.K) { StartCap = SD2.LineCap.Round, EndCap = SD2.LineCap.Round, LineJoin = SD2.LineJoin.Round })
-                g.DrawLines(p, new[] { new SD.PointF(cx - u, cy), new SD.PointF(cx - u * 0.3f, cy + u * 0.7f), new SD.PointF(cx + u, cy - u * 0.7f) });
+            return new Border { Height = 1, Background = Ui.B("Line"), Margin = new Thickness(8, 4, 8, 4), SnapsToDevicePixels = true };
+        }
+
+        public void Sync(string state, string live, bool game, bool sys)
+        {
+            _game.IsChecked = game;
+            _sys.IsChecked = sys;
+            _state.Text = StateText(state);
+            var brush = Ui.B(state == "ACTIVE" ? "Ok" : state == "ARMED" ? "Warn" : "Bad");
+            _dot.Fill = brush;
+            _state.Foreground = brush;
+            var o = Optimizer.Instance;
+            string targets = o != null && o.Eng.Targets != null ? string.Join(", ", o.Eng.Targets) : "cs2.exe";
+            _sub.Text = state == "OFF" ? L.T("Optimizers are off")
+                      : !string.IsNullOrEmpty(live) && game ? L.F("optimizing {0}", live)
+                      : game ? L.F("waiting for {0}", targets)
+                      : L.F("system threads: {0}", o != null ? o.Eng.SysThreadCount : 0);
+        }
+
+        // At the cursor (physical pixels): the card's bottom-right corner at the pointer, kept inside the work area.
+        public void ShowAt(SD.Point px)
+        {
+            _anchor = px;
+            if (!IsVisible)
+            {
+                Opacity = 0;
+                Left = -32000; Top = -32000;
+                Show();
+            }
+            Place();
+            Opacity = 1;
+            try { Activate(); } catch { }
+        }
+
+        private void Place()
+        {
+            var h = new WindowInteropHelper(this).Handle;
+            if (h == IntPtr.Zero) return;
+            // onto the pointer's monitor first (per-monitor DPI rescales the card there), then measure and align
+            SetWindowPos(h, HWND_TOPMOST, _anchor.X, _anchor.Y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            UpdateLayout();
+            RECT r;
+            if (!GetWindowRect(h, out r)) return;
+            int w = r.Right - r.Left, ht = r.Bottom - r.Top;
+            double k = 1.0;
+            try { k = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
+            int m = (int)Math.Round(Shadow * k);
+            var wa = WF.Screen.FromPoint(_anchor).WorkingArea;
+            int x = _anchor.X - w + m, y = _anchor.Y - ht + m;
+            x = Math.Max(wa.Left - m, Math.Min(x, wa.Right - w + m));
+            y = Math.Max(wa.Top - m, Math.Min(y, wa.Bottom - ht + m));
+            SetWindowPos(h, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         }
     }
 }
