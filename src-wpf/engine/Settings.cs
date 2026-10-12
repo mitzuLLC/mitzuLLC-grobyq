@@ -179,6 +179,18 @@ namespace Grobyq
             catch { }
         }
 
+        // Back to the first-run default: the stored value is removed, so Get answers the default again.
+        public static void Reset(params string[] names)
+        {
+            MigrateOnce();
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(Root, true))
+                    if (k != null) foreach (var n in names) { try { k.DeleteValue(n, false); } catch { } }
+            }
+            catch { }
+        }
+
         // Watch list, always "<name>.exe" (presets, affinity rules and the foreground check key on it), no duplicates.
         public static string[] WatchList()
         {

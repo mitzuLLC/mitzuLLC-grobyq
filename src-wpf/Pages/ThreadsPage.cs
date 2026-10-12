@@ -102,9 +102,14 @@ namespace Grobyq.Pages
             var bg = Card();
             bg.Add(SwitchRow(L.T("Lower background processes"), L.T("The processes in the list below get a lower class, VeryLow I/O and Low memory priority while the game runs."), "DoBackground"));
             bg.Add(SwitchRow(L.T("Pin background off the game cores"), L.T("Background processes get the cores the game mask leaves free (E-cores, SMT siblings, the other CCD). Helps most on multi-CCD CPUs or with heavy background; neutral otherwise - measure."), "BgAffinity"));
-            bg.Add(SwitchRow(L.T("Release background on alt-tab"), L.T("Recommended on. When the game loses focus, background processes get their priority and cores back."), "BgForeground", false));
-            var list = bg.Add(Ui.Text(string.Join("  ", Settings.BgProcs()), 9, "Faint"));
-            list.Margin = new Thickness(0, 0, 0, 10);
+            bg.Add(SwitchRow(L.T("Release background on alt-tab"), L.T("Recommended on. When the game loses focus, background processes get their priority and cores back."), "BgForeground"));
+            BuildBackgroundList(bg);                         // chips + Add (ThreadsPage.Background.cs)
+
+            // ---- reset: this page only (the whole app resets in Settings) ----
+            var rs = Card();
+            var resetBtn = Ui.Btn(L.T("Reset thread settings"), "BtnDangerQuiet");
+            resetBtn.Click += (s, e) => ResetThreads();
+            rs.Add(Ui.Row(L.T("Reset thread settings"), L.T("Both optimizers off, every change back to its Windows default; games, parts, game presets and the background list back to the first-run defaults. Affinity and the app settings stay."), resetBtn, false));
 
             // ---- the Save bar, pinned under the page ----
             var bar = new Grid();
@@ -299,14 +304,16 @@ namespace Grobyq.Pages
         // ------------------------------------------------------------------ draft / save
         private void Draft(string key, string value)
         {
-            if (string.Equals(value ?? "", Settings.Get(key) ?? "", StringComparison.Ordinal)) _draft.Remove(key);
+            // the background list keeps a stored empty list empty (Get would answer the default list)
+            string cur = string.Equals(key, "BgProcs", StringComparison.OrdinalIgnoreCase) ? string.Join(" ", Settings.BgProcs()) : Settings.Get(key) ?? "";
+            if (string.Equals(value ?? "", cur, StringComparison.Ordinal)) _draft.Remove(key);
             else _draft[key] = value ?? "";
             UpdateSaveBar(null);
         }
 
         private void UpdateSaveBar(string done)
         {
-            int changes = _draft.Count + DirtyPresets().Count;
+            int changes = _draft.Count + DirtyPresets().Count + (BgClassesDirty() ? 1 : 0);
             bool dirty = changes > 0;
             bool noGame = _games.Count == 0;
             _save.IsEnabled = dirty && !noGame;
@@ -319,7 +326,7 @@ namespace Grobyq.Pages
 
         private void SaveDraft()
         {
-            if ((_draft.Count == 0 && DirtyPresets().Count == 0) || _games.Count == 0) return;
+            if ((_draft.Count == 0 && DirtyPresets().Count == 0 && !BgClassesDirty()) || _games.Count == 0) return;
             var parts = new List<string>();
             foreach (var kv in _draft)
             {
@@ -329,6 +336,7 @@ namespace Grobyq.Pages
             _draft.Clear();
             if (parts.Count > 0) AppLog.Add("[i] saved: " + string.Join(", ", parts));
             SavePresets();
+            SaveBgClasses();
             var o = Optimizer.Instance;
             bool active = o != null && o.Active;
             if (o != null) o.Reapply();
@@ -360,6 +368,7 @@ namespace Grobyq.Pages
             finally { _loading = false; }
             FillGames();
             FillPick();
+            ResyncBg();
         }
 
         // ------------------------------------------------------------------ state
