@@ -19,7 +19,7 @@ namespace Grobyq.Pages
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
 
-        private readonly CheckBox _gameSw, _sysSw;
+        private readonly CheckBox _gameSw, _sysSw, _frontSw;
         private readonly Ellipse _gameDot, _sysDot;
         private readonly TextBlock _gameStat, _sysStat;
         private readonly Dictionary<string, BoxCheck> _known = new Dictionary<string, BoxCheck>(StringComparer.OrdinalIgnoreCase);
@@ -30,7 +30,6 @@ namespace Grobyq.Pages
 
         private readonly Button _save, _cancel;
         private readonly TextBlock _saveText;
-        private readonly TextBox _period;
         private readonly Dictionary<string, CheckBox> _switches = new Dictionary<string, CheckBox>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _draft = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private bool _loading;
@@ -44,7 +43,7 @@ namespace Grobyq.Pages
             _gameSw = Ui.Switch(false);
             _gameSw.Click += (s, e) => { OptUi.Game(_gameSw.IsChecked == true); UpdateState(); };
             top.Add(OptimizerRow(L.T("Game threads optimizer"),
-                L.T("Waits for the games below and, while one runs, applies what is switched on below and saved."),
+                L.T("While a game below is in front, applies what is switched on below and saved. Minimized or closed - everything goes back."),
                 _gameSw, out _gameDot, out _gameStat, true));
             _sysSw = Ui.Switch(false);
             _sysSw.Click += (s, e) =>
@@ -53,8 +52,19 @@ namespace Grobyq.Pages
                 UpdateState();
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
-                L.T("grobyq's built-in profile: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
-                _sysSw, out _sysDot, out _sysStat, false));
+                L.T("grobyq's built-in profile while the game is in front: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
+                _sysSw, out _sysDot, out _sysStat, true));
+            // WHEN both apply: acts at once, like the switches above
+            _frontSw = Ui.Switch(Settings.GetBool("BgForeground"));
+            _frontSw.Click += (s, e) =>
+            {
+                bool on = _frontSw.IsChecked == true;
+                Settings.SetBool("BgForeground", on);
+                AppLog.Add("[UI] only while the game is in front = " + (on ? "on" : "off"));
+                var o = Optimizer.Instance; if (o != null) o.Refresh();
+                UpdateState();
+            };
+            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Recommended on. The game is minimized or you alt-tab - everything grobyq changed goes back to normal; back in the game - applied again. Off = kept while the game runs."), _frontSw, false));
 
             // ---- games ----
             Title(L.T("Games"));
@@ -80,16 +90,7 @@ namespace Grobyq.Pages
             card.Add(SwitchRow(L.T("Game process priority"), L.T("The game gets its preset class (High, never Realtime), normal I/O and memory priority and EcoQoS off while it runs."), "DoProcess"));
             card.Add(SwitchRow(L.T("Optimize threads"), L.T("A scheduler hint for the game: Ideal CPU plus a priority on its busiest threads (named rules and hot threads). Off = no thread of the game is touched."), "DoThreads"));
             card.Add(SwitchRow(L.T("Avoid CPU 0 for hot threads"), L.T("On 6+ core CPUs no hot thread gets CPU 0 as its Ideal CPU (interrupt-heavy by default)."), "SkipCpu0"));
-            card.Add(SwitchRow(L.T("Re-apply periodically"), L.T("Every few seconds, while the game runs: catches new threads and anything that reset the priority."), "PeriodicReapply"));
-            _period = Ui.Box(PeriodSeconds(Settings.Get("Period")), 80);
-            _period.TextChanged += (s, e) =>
-            {
-                if (_loading) return;
-                int sec;
-                if (int.TryParse((_period.Text ?? "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out sec))
-                    Draft("Period", (Math.Max(1, Math.Min(60, sec)) * 1000).ToString(CultureInfo.InvariantCulture));
-            };
-            card.Add(Ui.Row(L.T("Re-apply period, seconds"), L.T("2 s is the balance: 1 s re-scans more than it helps, 5 s can miss threads created while a map loads."), _period));
+            card.Add(SwitchRow(L.T("Catch new threads"), L.T("While the game is in front: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again."), "PeriodicReapply"));
             var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
             toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
             card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff, false));
@@ -102,7 +103,6 @@ namespace Grobyq.Pages
             var bg = Card();
             bg.Add(SwitchRow(L.T("Lower background processes"), L.T("The processes in the list below get a lower class, VeryLow I/O and Low memory priority while the game runs."), "DoBackground"));
             bg.Add(SwitchRow(L.T("Pin background off the game cores"), L.T("Background processes get the cores the game mask leaves free (E-cores, SMT siblings, the other CCD). Helps most on multi-CCD CPUs or with heavy background; neutral otherwise - measure."), "BgAffinity"));
-            bg.Add(SwitchRow(L.T("Release background on alt-tab"), L.T("Recommended on. When the game loses focus, background processes get their priority and cores back."), "BgForeground"));
             BuildBackgroundList(bg);                         // chips + Add (ThreadsPage.Background.cs)
 
             // ---- reset: this page only (the whole app resets in Settings) ----
@@ -158,12 +158,6 @@ namespace Grobyq.Pages
             Grid.SetColumn(sw, 1);
             g.Children.Add(sw);
             return new Border { Child = g, BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(0, 0, 0, divider ? 1 : 0), SnapsToDevicePixels = true };
-        }
-
-        private static string PeriodSeconds(string ms)
-        {
-            int v; if (!int.TryParse(ms, NumberStyles.Integer, CultureInfo.InvariantCulture, out v)) v = 2000;
-            return Math.Max(1, Math.Min(60, v / 1000)).ToString(CultureInfo.InvariantCulture);
         }
 
         private Border SwitchRow(string title, string desc, string key, bool divider = true)
@@ -359,7 +353,7 @@ namespace Grobyq.Pages
             try
             {
                 foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
-                _period.Text = PeriodSeconds(Settings.Get("Period"));
+                if (_frontSw != null) _frontSw.IsChecked = Settings.GetBool("BgForeground");
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
                 _labels.Clear();
@@ -376,26 +370,29 @@ namespace Grobyq.Pages
         {
             if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke((Action)UpdateState); return; }
             var o = Optimizer.Instance;
-            bool game = o != null && o.GameOn, sys = o != null && o.SysOn;
+            bool game = o != null && o.GameOn, sys = o != null && o.SysOn, session = o != null && o.InSession;
             _gameSw.IsChecked = game;
             _sysSw.IsChecked = sys;
             string live = o != null ? o.LiveTarget : "";
             string targets = o != null && o.Eng.Targets != null ? string.Join(", ", o.Eng.Targets) : "cs2.exe";
+            bool userBg = game && Settings.GetBool("DoBackground");
 
             if (!game) Stat(_gameDot, _gameStat, "Faint", L.T("off - games are not touched"));
             else if (string.IsNullOrEmpty(live)) Stat(_gameDot, _gameStat, "Warn", L.F("armed - waiting for {0}", targets));
+            else if (!session) Stat(_gameDot, _gameStat, "Warn", L.F("{0} is minimized - normal mode", live));
             else
             {
-                string t = L.F("optimizing {0}", live) + "   ·   " + L.F("threads: {0}", o.Eng.LastThreads);
-                if (Settings.GetBool("DoBackground")) t += "   ·   " + L.F("background: {0}", o.Eng.BgOn ? o.Eng.LastBg : 0);
+                string t = L.F("optimizing {0}", live) + "   ·   " + L.F("threads: {0}", o.Eng.GameThreadCount);
+                if (userBg) t += "   ·   " + L.F("background: {0}", o.Eng.BgOn ? o.Eng.LastBg : 0);
                 Stat(_gameDot, _gameStat, "Ok", t);
             }
 
             if (!sys) Stat(_sysDot, _sysStat, "Faint", L.T("off - system processes are not touched"));
+            else if (!session) Stat(_sysDot, _sysStat, "Warn", L.T("waiting for a game in front - nothing is changed now"));
             else
             {
                 string t = L.F("threads: {0}   ·   processes: {1}", o.Eng.SysThreadCount, o.Eng.SysProcCount);
-                if (!(game && Settings.GetBool("DoBackground")) && o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);
+                if (!userBg && o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
         }

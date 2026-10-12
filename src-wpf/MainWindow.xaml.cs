@@ -291,6 +291,7 @@ namespace Grobyq
             if (o != null)
             {
                 try { o.Stop(); } catch { }
+                try { o.Drain(3000); } catch { }          // queued apply / restore jobs first, so the final restore lands last
                 if (Settings.GetBool("RestoreOnExit") && (o.Active || o.Eng.HasChanges)) { try { o.Eng.Revert(); } catch { } }
             }
             try { IrqTrace.StopStale(); } catch { }

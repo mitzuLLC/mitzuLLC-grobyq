@@ -37,6 +37,7 @@ namespace Grobyq
         {
             _icon = new WF.NotifyIcon { Text = Brand.Name };
             _icon.Icon = Make(CBad);
+            _shownColor = CBad.ToArgb();
             _icon.DoubleClick += (s, e) => { if (_menu != null) _menu.Hide(); var h = DoubleClicked; if (h != null) h(); };
             _icon.MouseUp += (s, e) => { if (e.Button == WF.MouseButtons.Right) ShowMenu(); };
             _icon.Visible = true;
@@ -72,13 +73,18 @@ namespace Grobyq
         }
 
         // state: OFF / ARMED / ACTIVE; game / sys = the two optimizer switches
+        private int _shownColor;
+        private string _shownText;
+
         public void SetState(string state, string live, bool game, bool sys)
         {
             _state = state ?? "OFF"; _live = live ?? ""; _game = game; _sys = sys;
             SD.Color c = _state == "ACTIVE" ? COk : _state == "ARMED" ? CWarn : CBad;
-            try { _icon.Icon = Make(c); } catch { }
+            // the shell is told only about a real change (every NotifyIcon write is a Shell_NotifyIcon call)
+            if (c.ToArgb() != _shownColor) { try { _icon.Icon = Make(c); _shownColor = c.ToArgb(); } catch { } }
             string text = Brand.Name + " - " + TrayMenu.StateText(_state) + (_live.Length > 0 ? ": " + _live : "");
-            try { _icon.Text = text.Length > 63 ? text.Substring(0, 60) + "..." : text; } catch { }
+            if (text.Length > 63) text = text.Substring(0, 60) + "...";
+            if (text != _shownText) { try { _icon.Text = text; _shownText = text; } catch { } }
             if (_menu != null && _menu.IsVisible) _menu.Sync(_state, _live, _game, _sys);
         }
 
@@ -310,9 +316,9 @@ namespace Grobyq
             var o = Optimizer.Instance;
             string targets = o != null && o.Eng.Targets != null ? string.Join(", ", o.Eng.Targets) : "cs2.exe";
             _sub.Text = state == "OFF" ? L.T("Optimizers are off")
-                      : !string.IsNullOrEmpty(live) && game ? L.F("optimizing {0}", live)
-                      : game ? L.F("waiting for {0}", targets)
-                      : L.F("system threads: {0}", o != null ? o.Eng.SysThreadCount : 0);
+                      : state == "ACTIVE" ? L.F("optimizing {0}", live)
+                      : !string.IsNullOrEmpty(live) ? L.F("{0} is minimized - normal mode", live)
+                      : L.F("waiting for {0}", targets);
         }
 
         // At the cursor (physical pixels): the card's bottom-right corner at the pointer, kept inside the work area.

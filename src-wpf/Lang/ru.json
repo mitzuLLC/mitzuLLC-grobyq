@@ -1278,5 +1278,13 @@
  "Running programs. Pick one, or choose an .exe on disk.": "Запущенные программы. Выберите одну или укажите .exe на диске.",
  "Choose .exe...": "Выбрать .exe…",
  "Nothing found. Choose the .exe on disk instead.": "Ничего не найдено. Укажите .exe на диске.",
- "Programs": "Программы"
+ "Programs": "Программы",
+ "While a game below is in front, applies what is switched on below and saved. Minimized or closed - everything goes back.": "Пока игра из списка ниже на экране, применяет то, что включено ниже и сохранено. Свернули или закрыли — всё возвращается.",
+ "grobyq's built-in profile while the game is in front: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible.": "Встроенный профиль grobyq, пока игра на экране: приоритеты потоков системных процессов, NVIDIA, Steam и Discord. Только приоритет и повышение, всё обратимо.",
+ "Only while the game is in front": "Только пока игра на экране",
+ "Recommended on. The game is minimized or you alt-tab - everything grobyq changed goes back to normal; back in the game - applied again. Off = kept while the game runs.": "Рекомендуется вкл. Игра свёрнута или Alt+Tab — всё, что поменял grobyq, возвращается к обычному режиму; вернулись в игру — применяется снова. Выкл. = держится, пока игра запущена.",
+ "Catch new threads": "Подхватывать новые потоки",
+ "While the game is in front: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again.": "Пока игра на экране: раз в 2 с новые потоки игры и процессов из профиля получают свои настройки. То, что уже настроено, только проверяется и повторно не записывается.",
+ "{0} is minimized - normal mode": "{0} свёрнута — обычный режим",
+ "waiting for a game in front - nothing is changed now": "ждёт игру на экране — сейчас ничего не меняется"
 }

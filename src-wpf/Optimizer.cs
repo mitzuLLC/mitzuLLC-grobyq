@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -8,41 +9,51 @@ using System.Windows.Threading;
 
 namespace Grobyq
 {
-    // Drives the engine: two independent switches, the 1 s watch tick (target detect, periodic re-apply off the UI thread,
-    // background foreground apply) and the restore when a switch goes off. Results go to AppLog; StateChanged fires so the
-    // pages and the tray can read the state.
+    // Drives the engine with two switches and one rule for WHEN things apply: the game session.
     //
-    //   Game threads optimizer   - waits for the chosen games; while one runs, applies only the parts the user switched on
-    //                              and saved (process priority, core mask, threads, background, affinity rules).
-    //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...), priority and
-    //                              boost only, re-applied every 10 s; its background list is lowered while a game has focus.
-    // Both start off (v4 manual mode) and keep their position across restarts. A switch going off restores every baseline
-    // and re-applies the other layer, so exactly what is still switched on stays applied.
+    //   Game threads optimizer   - the parts the user switched on and saved (process priority, core mask, threads,
+    //                              background list, affinity rules) for the chosen games.
+    //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...).
+    //
+    // Session = a chosen game runs and its window is in front ("Only while the game is in front", on by default; off =
+    // while the game runs). Session start: everything switched on is applied once. During the session a catch-up pass
+    // every 2 s ("Catch new threads") handles only what is new: the engine reads each value back and writes only what
+    // differs, and a thread gets its Ideal CPU once. Session end (alt-tab, minimize, the game closes): every baseline is
+    // restored - normal mode. Outside a session nothing is applied, whatever the switches say.
+    //
+    // Engine calls run on one worker thread, in order (apply, catch-up, restore): a restore queued after an apply always
+    // lands last. Results go to AppLog; StateChanged fires on the UI thread when something visible changed.
     public sealed class Optimizer
     {
         public static Optimizer Instance { get; private set; }
 
         public readonly Engine Eng;
         private readonly DispatcherTimer _timer;
-        private bool _game, _sys;
+        private bool _game, _sys, _session;
         private int _tick;
-        private int _applyRunning;
         private string _liveTarget = "";
         private string _gameRuleLogged;
+        private string _stateSig = "";
         private Topo _topo;
         private DateTime _topoAt;
+
+        private readonly BlockingCollection<Action> _jobs = new BlockingCollection<Action>();
+        private int _queued;
 
         public event Action StateChanged;
         public bool GameOn => _game;                 // game threads optimizer switch
         public bool SysOn => _sys;                   // system threads optimizer switch
         public bool Active => _game || _sys;
+        public bool InSession => _session;           // a game is in front: what is switched on is applied
         public string LiveTarget => _liveTarget;     // running games (comma separated), "" = none
-        // OFF = both switches off; ARMED = only the game optimizer, waiting for a game; ACTIVE = something is applied
-        public string StateName => !Active ? "OFF" : (_game && !_sys && string.IsNullOrEmpty(_liveTarget)) ? "ARMED" : "ACTIVE";
+        // OFF = both switches off; ARMED = on, no game session (waiting, or the game is minimized); ACTIVE = applied
+        public string StateName => !Active ? "OFF" : _session ? "ACTIVE" : "ARMED";
 
         // The parts of the game optimizer a user can switch on (Settings keys). None on = the game switch changes nothing.
         public static readonly string[] Parts = { "DoProcess", "DoMask", "DoThreads", "DoBackground", "DoAffRules" };
         public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
+        // "Only while the game is in front" (the old "release background on alt-tab" key, now for everything)
+        public static bool FrontOnly { get { return Settings.GetBool("BgForeground"); } }
 
         public Optimizer()
         {
@@ -55,13 +66,75 @@ namespace Grobyq
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }
 
+            new Thread(Work) { IsBackground = true, Name = "grobyq-engine", Priority = ThreadPriority.Normal }.Start();
+
+            // the switches come back in the position they were left in; nothing is applied until a game session starts
+            _sys = Settings.GetBool("SystemThreadOpt");
+            if (_sys) { try { Eng.LoadSystemProfile(true); } catch { } }
+            _game = Settings.GetBool("GameOpt");
+            if (Active) AppLog.Add("[i] " + Which() + " threads optimizer on - waiting for a game in front");
+
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += (s, e) => Tick();
             _timer.Start();
+        }
 
-            // the switches come back in the position they were left in
-            if (Settings.GetBool("SystemThreadOpt")) SetSystem(true);
-            if (Settings.GetBool("GameOpt")) SetGame(true);
+        private string Which() { return (_game ? "game" : "") + (_game && _sys ? " + " : "") + (_sys ? "system" : ""); }
+
+        // ------------------------------------------------------------------ the engine worker
+        private void Work()
+        {
+            foreach (var job in _jobs.GetConsumingEnumerable())
+            {
+                try { job(); } catch { }
+                Interlocked.Decrement(ref _queued);
+            }
+        }
+
+        // An engine job in the queue; its log lines and a state refresh come back on the UI thread. skipIfBusy: a catch-up
+        // is dropped while anything else is still queued (the next tick tries again).
+        private void Queue(Func<List<string>> job, bool skipIfBusy = false, bool reports = false)
+        {
+            if (skipIfBusy && Volatile.Read(ref _queued) > 0) return;
+            Interlocked.Increment(ref _queued);
+            try
+            {
+                _jobs.Add(() =>
+                {
+                    List<string> log = null; List<ApplyReport> reps = null; string err = null;
+                    try { log = job(); if (reports) reps = new List<ApplyReport>(Eng.LastReports); }
+                    catch (Exception ex) { err = ex.Message; }
+                    Post(() =>
+                    {
+                        if (err != null) AppLog.Add("[!!] " + err);
+                        if (log != null && log.Count > 0) AppLog.Add(log);
+                        if (reps != null) foreach (var rep in reps) AppLog.Add(RepLine(rep));
+                        StateChanged?.Invoke();
+                    });
+                });
+            }
+            catch { Interlocked.Decrement(ref _queued); }
+        }
+
+        private void QueueApply(bool reports)
+        {
+            var o = Opts();                          // read on the UI thread (settings, topology), applied on the worker
+            Queue(() => Eng.ApplyAll(o), false, reports);
+        }
+
+        private void QueueRevert() { Queue(() => Eng.Revert()); }
+
+        private static void Post(Action a)
+        {
+            var app = Application.Current;
+            try { if (app != null) app.Dispatcher.BeginInvoke(a); else a(); } catch { }
+        }
+
+        // Exit paths: wait (bounded) until every queued job ran, then the final restore can run.
+        public void Drain(int ms)
+        {
+            var sw = Stopwatch.StartNew();
+            while (Volatile.Read(ref _queued) > 0 && sw.ElapsedMilliseconds < ms) Thread.Sleep(20);
         }
 
         public void Stop() { try { _timer.Stop(); } catch { } }
@@ -73,26 +146,16 @@ namespace Grobyq
             return _topo;
         }
 
-        // Game threads optimizer on/off (kept in Settings "GameOpt"). Off restores every baseline, then the system layer
-        // (if on) is applied again.
+        // ------------------------------------------------------------------ the switches
+        // Game threads optimizer on/off (kept in Settings "GameOpt").
         public void SetGame(bool on)
         {
             if (on == _game) return;
             _game = on;
             Settings.Set("GameOpt", on ? "1" : "0");
-            if (on)
-            {
-                AppLog.Add("=== GAME THREADS OPTIMIZER ON ===");
-                if (!AnyPartOn) AppLog.Add("[i] nothing is switched on to optimize: pick the parts on Threads and press Save");
-                ApplyNow();
-            }
-            else
-            {
-                AppLog.Add("=== GAME THREADS OPTIMIZER OFF ===");
-                RevertAll();
-                if (_sys) ApplyNow(); else _liveTarget = "";
-            }
-            StateChanged?.Invoke();
+            AppLog.Add(on ? "=== GAME THREADS OPTIMIZER ON ===" : "=== GAME THREADS OPTIMIZER OFF ===");
+            if (on && !AnyPartOn) AppLog.Add("[i] nothing is switched on to optimize: pick the parts on Threads and press Save");
+            Evaluate(true);
         }
 
         // System threads optimizer on/off (kept in Settings "SystemThreadOpt"): the built-in profile is loaded / dropped.
@@ -103,49 +166,77 @@ namespace Grobyq
             Settings.Set("SystemThreadOpt", on ? "1" : "0");
             try { Eng.LoadSystemProfile(on); } catch { }
             if (on)
-            {
-                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes; priority and boost only, anti-cheats skipped{2})",
+                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes; priority and boost only, anti-cheats skipped{2}; applied while a game is in front)",
                     Eng.SystemPresets.Count, Eng.SystemBg.Count, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped"));
-                ApplyNow();
-            }
-            else
-            {
-                AppLog.Add("=== SYSTEM THREADS OPTIMIZER OFF ===");
-                RevertAll();
-                if (_game) ApplyNow(); else _liveTarget = "";
-            }
-            StateChanged?.Invoke();
+            else AppLog.Add("=== SYSTEM THREADS OPTIMIZER OFF ===");
+            Evaluate(true);
         }
 
-        // Both switches off at once (Threads > Reset, exit paths): every baseline back.
+        // Both switches off at once (Threads > Reset, Settings > Reset): every baseline back.
         public void StopAll()
         {
-            if (!Active) return;
+            bool was = Active || Eng.HasChanges;
             _game = false; _sys = false;
             Settings.Set("GameOpt", "0");
             Settings.Set("SystemThreadOpt", "0");
             try { Eng.LoadSystemProfile(false); } catch { }
-            AppLog.Add("=== OPTIMIZERS OFF ===");
-            RevertAll();
-            _liveTarget = "";
-            StateChanged?.Invoke();
+            _session = false;
+            if (was) { AppLog.Add("=== OPTIMIZERS OFF ==="); QueueRevert(); }
+            Evaluate(false);
         }
 
-        private void RevertAll()
-        {
-            try { AppLog.Add(Eng.Revert()); } catch (Exception ex) { AppLog.Add("[!!] " + ex.Message); }
-        }
-
-        // After Save: the new choice replaces the old one completely. A switch on = restore every baseline, then apply the
-        // saved parts from scratch (a part switched off is undone, not just left alone). Both off = nothing is touched.
+        // After Save: the new choice replaces the old one completely - in a session every baseline is restored and the
+        // saved parts are applied from scratch (a part switched off is undone, not left alone).
         public void Reapply()
         {
             Eng.Targets = Settings.WatchList();
             if (Eng.Targets.Length == 0) Eng.Targets = new[] { "cs2.exe" };
-            if (!Active) { StateChanged?.Invoke(); return; }
-            RevertAll();
-            _liveTarget = "";
-            ApplyNow();
+            Evaluate(true);
+        }
+
+        // Another page saved something the session applies (core mask, affinity rules): rebuild it now.
+        public void ApplyNow() { if (_session) Evaluate(true); }
+
+        // "Only while the game is in front" changed: the session follows at once.
+        public void Refresh() { Evaluate(false); }
+
+        // ------------------------------------------------------------------ the session
+        // Re-evaluates the session now. rebuild = what is applied changed (a switch, Save): restore, then apply afresh.
+        private void Evaluate(bool rebuild)
+        {
+            string now = Active ? RunningGames() : "";
+            if (now != _liveTarget)
+            {
+                if (now.Length > 0 && _liveTarget.Length == 0) AppLog.Add("[>>] game started: " + now);
+                else if (now.Length == 0 && _liveTarget.Length > 0) AppLog.Add("[<<] game closed: " + _liveTarget);
+                _liveTarget = now;
+            }
+            bool front = now.Length > 0 && (!FrontOnly || Eng.GameForeground());
+            bool want = Active && front;
+            if (want && !_session)
+            {
+                _session = true;
+                AppLog.Add("[>>] " + now + " in front - " + Which() + " optimization on");
+                QueueApply(true);
+            }
+            else if (!want && _session)
+            {
+                _session = false;
+                AppLog.Add(now.Length == 0 || !Active ? "[<<] normal mode" : "[<<] " + now + " minimized - normal mode");
+                QueueRevert();
+            }
+            else if (want && rebuild)
+            {
+                QueueRevert();
+                QueueApply(true);
+            }
+            string sig = Active + "|" + _session + "|" + _liveTarget + "|" + _game + "|" + _sys;
+            if (rebuild || sig != _stateSig) { _stateSig = sig; StateChanged?.Invoke(); }
+        }
+
+        private string RunningGames()
+        {
+            return string.Join(", ", Eng.Targets.Where(t => ByNameCount(t) > 0));
         }
 
         public ApplyOptions Opts() => new ApplyOptions
@@ -159,56 +250,12 @@ namespace Grobyq
             DoThreads = Settings.GetBool("DoThreads"),
             DoBackground = Settings.GetBool("DoBackground"),
             BgAffinity = Settings.GetBool("BgAffinity"),
-            BgForeground = Settings.GetBool("BgForeground"),
+            BgForeground = FrontOnly,
             DoAffRules = Settings.GetBool("DoAffRules"),
             Game = _game,
             Sys = _sys,
             Warmup = false
         };
-
-        public void ApplyNow()
-        {
-            try
-            {
-                AppLog.Add(Eng.ApplyAll(Opts()));
-                _liveTarget = Eng.LiveTarget;
-                foreach (var rep in Eng.LastReports) AppLog.Add(RepLine(rep));
-            }
-            catch (Exception ex) { AppLog.Add("[!!] " + ex.Message); }
-            StateChanged?.Invoke();
-        }
-
-        public void ApplyNowAsync()
-        {
-            if (Interlocked.CompareExchange(ref _applyRunning, 1, 0) != 0) return;   // previous cycle still running
-            var opts = Opts();
-            var th = new Thread(() =>
-            {
-                List<string> log = null; List<ApplyReport> reps = null; string live = null; string err = null;
-                try { log = Eng.ApplyAll(opts); live = Eng.LiveTarget; reps = new List<ApplyReport>(Eng.LastReports); }
-                catch (Exception ex) { err = ex.Message; }
-                finally
-                {
-                    Action post = () =>
-                    {
-                        if (err != null) AppLog.Add("[!!] " + err);
-                        else
-                        {
-                            if (log != null) AppLog.Add(log);
-                            if (Active) _liveTarget = live;
-                            if (reps != null) foreach (var rep in reps) AppLog.Add(RepLine(rep));
-                            StateChanged?.Invoke();
-                        }
-                        Interlocked.Exchange(ref _applyRunning, 0);
-                    };
-                    var app = Application.Current;
-                    try { if (app != null) app.Dispatcher.BeginInvoke(post); else post(); }
-                    catch { Interlocked.Exchange(ref _applyRunning, 0); }
-                }
-            })
-            { IsBackground = true, Priority = ThreadPriority.Normal };
-            th.Start();
-        }
 
         private static string RepLine(ApplyReport rep) =>
             string.Format("[==] {0} L{1} mask {2} [{3}] named {4} cycle {5}{6}",
@@ -220,70 +267,18 @@ namespace Grobyq
             try
             {
                 _tick++;
-                if (!Active) { if (_tick % 60 == 0) Eng.Prune(); return; }
+                if (Active || _session) Evaluate(false);
 
-                var running = Eng.Targets.Where(t => ByNameCount(t) > 0).ToList();
-                string now = string.Join(", ", running);
-                bool applied = false;
-                if (now != _liveTarget)
+                // catch-up inside the session: new threads only (reads everything, writes what differs)
+                if (_session && Settings.GetBool("PeriodicReapply"))
                 {
-                    _liveTarget = now;
-                    if (now.Length > 0) { AppLog.Add("[>>] game detected: " + now); ApplyNow(); applied = true; }
-                    else { AppLog.Add("[<<] no game running" + (_game ? " - back to armed" : "")); if (Eng.BgOn) AppLog.Add(Eng.BgRelease()); }
-                    StateChanged?.Invoke();
+                    int every = Math.Max(1, Math.Max(1000, Settings.GetInt("Period", 2000)) / 1000);
+                    if (_tick % every == 0) { var o = Opts(); Queue(() => Eng.ApplyAll(o), true); }
                 }
 
-                // background lowering follows the game window: the system profile's list always does, the user's list
-                // unless "Release background on alt-tab" is off (then it stays lowered while the game runs)
-                bool userBg = _game && Settings.GetBool("DoBackground");
-                bool sysBg = _sys && Eng.SystemBg.Count > 0;
-                if (now.Length > 0 && (userBg || sysBg) && (!userBg || Settings.GetBool("BgForeground")))
-                {
-                    bool fg = Eng.GameForeground();
-                    if (fg && !Eng.BgOn) { AppLog.Add(Eng.BgApply(userBg && Settings.GetBool("BgAffinity"), GameMask.ManualRule(SafeTopo()), userBg, sysBg)); StateChanged?.Invoke(); }
-                    else if (!fg && Eng.BgOn) { AppLog.Add(Eng.BgRelease()); StateChanged?.Invoke(); }
-                }
-
-                if (!applied && _game && Settings.GetBool("PeriodicReapply") && now.Length > 0)
-                {
-                    int period = Math.Max(1000, Settings.GetInt("Period", 2000));
-                    int every = Math.Max(1, period / 1000);
-                    if (_tick % every == 0) { ApplyNowAsync(); applied = true; }
-                }
-
-                // the system profile: every 10 s (new threads in system processes; a no-op for unchanged ones)
-                if (!applied && _sys && _tick % 10 == 0) ApplySystemAsync();
-
-                if (_tick % 60 == 0) Eng.Prune();
+                if (_tick % 60 == 0) Queue(() => { Eng.Prune(); return null; }, true);
             }
             catch { }
-        }
-
-        private int _sysRunning;
-        private void ApplySystemAsync()
-        {
-            if (Interlocked.CompareExchange(ref _sysRunning, 1, 0) != 0) return;
-            var th = new Thread(() =>
-            {
-                List<string> log = null; string err = null;
-                try { log = Eng.ApplySystemLayer(); }
-                catch (Exception ex) { err = ex.Message; }
-                finally
-                {
-                    Action post = () =>
-                    {
-                        if (err != null) AppLog.Add("[!!] " + err);
-                        else if (log != null && log.Count > 0) AppLog.Add(log);
-                        StateChanged?.Invoke();
-                        Interlocked.Exchange(ref _sysRunning, 0);
-                    };
-                    var app = Application.Current;
-                    try { if (app != null) app.Dispatcher.BeginInvoke(post); else post(); }
-                    catch { Interlocked.Exchange(ref _sysRunning, 0); }
-                }
-            })
-            { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "grobyq-sys" };
-            th.Start();
         }
 
         public string GameRule()

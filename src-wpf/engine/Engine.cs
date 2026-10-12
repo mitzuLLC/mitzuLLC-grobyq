@@ -158,11 +158,21 @@ namespace Grobyq
             public bool EcoKnown; public uint EcoCtl, EcoState;   // EcoQoS before grobyq (when Windows can report it)
             public bool Class, IoSet, MemSet, AffSet, SetsSet, Eco, Boost;
             public bool BgClass, BgIo, BgMem, BgAff;       // set by the background layer only (released on alt-tab)
+            public string LastSets = "";                  // the CPU sets written this session (written again only when they change)
         }
         // Thread baseline + what grobyq changed on it (an Ideal-CPU-only thread keeps its priority on revert).
         private sealed class ThrBefore { public int Prio; public bool BoostDisabled; public bool PrioSet, BoostSet; public long Born; }
         private readonly Dictionary<int, ProcBefore> _procBefore = new Dictionary<int, ProcBefore>();
         private readonly Dictionary<string, ThrBefore> _thrBefore = new Dictionary<string, ThrBefore>();
+
+        // Session memory (cleared by Revert): the Ideal CPU each game thread was given - kept for the whole session, so a
+        // catch-up pass never moves the busiest threads to other cores - the unnamed hot threads picked, and for how many
+        // passes a picked one has been idle (after ~5 its slot is free again; its hint stays, harmless).
+        private readonly Dictionary<string, uint> _ideal = new Dictionary<string, uint>();
+        private readonly HashSet<string> _hotPick = new HashSet<string>();
+        private readonly Dictionary<string, int> _hotIdle = new Dictionary<string, int>();
+        private readonly HashSet<int> _gamePids = new HashSet<int>();
+        public int GameThreadCount { get; private set; }     // game threads holding a grobyq setting right now
 
         // live caches
         private class ThrPrevE { public ulong C; public DateTime T; }
@@ -235,6 +245,10 @@ namespace Grobyq
             foreach (var k in _thrBefore.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrBefore.Remove(k);
             foreach (var k in _thrMeta.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrMeta.Remove(k);
             foreach (var k in _thrPrev.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrPrev.Remove(k);
+            foreach (var k in _ideal.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _ideal.Remove(k);
+            _hotPick.RemoveWhere(k => k.StartsWith(pre, StringComparison.Ordinal));
+            foreach (var k in _hotIdle.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _hotIdle.Remove(k);
+            _gamePids.Remove(pid);
         }
 
         // Baseline record of a thread. A TID reused by a NEW thread of the same process (creation time differs) gets a
@@ -498,7 +512,7 @@ namespace Grobyq
                 if (hp == IntPtr.Zero)
                 {
                     report.AccessDenied = true;
-                    log.Add(string.Format("[!!] PID {0}: access denied, err {1}. Expected on titles with kernel anti-cheat.", p.Id, err));
+                    AdviceOnce(log, "deny:" + p.Id, string.Format("[!!] PID {0}: access denied, err {1}. Expected on titles with kernel anti-cheat.", p.Id, err));
                     continue;
                 }
                 report.Pid = p.Id; report.HandleLevel = lvl;
@@ -506,39 +520,63 @@ namespace Grobyq
                 {
                     // F7: snapshot "before" on first touch; nothing is set without a captured baseline
                     Identity(p.Id, hp);
-                    if (!_procBefore.ContainsKey(p.Id)) _procBefore[p.Id] = Before(hp);
+                    bool fresh = !_procBefore.ContainsKey(p.Id);
+                    if (fresh) _procBefore[p.Id] = Before(hp);
                     Debug.Assert(_procBefore[p.Id].Have, "process baseline must be captured before any set");
+                    _gamePids.Add(p.Id);
 
                     var pb = _procBefore[p.Id];
                     // v4 manual mode: only the parts the user switched on are written (and only those get restored).
                     //   DoProcess = class / I/O / memory priority / EcoQoS off / process boost (preset)
                     //   DoMask    = process affinity + default CPU sets (the game core mask)
-                    bool okPrio = true, okMem = true, okEco = true, okAff = true, okSets = true;
+                    // Every value is read back first and written only when it differs: a catch-up pass over a running game
+                    // changes nothing that is already right (no re-set affinity / CPU sets = no thread migrations).
+                    bool okPrio = true, okMem = true, okEco = true, okAff = true, okSets = true, changed = false;
                     int stIo = 0;
                     if (o.DoProcess)
                     {
                         pb.Class = pb.IoSet = pb.MemSet = true;
-                        okPrio = Native.SetPriorityClass(hp, PRIO[cls]);
-                        stIo = Native.SetProcIo(hp, IOP[io]);
-                        okMem = Native.SetMemPrio(hp, MEM[mem], false);
-                        if (ecoOff) { pb.Eco = true; okEco = Native.SetPowerThrottling(hp, false); }
-                        if (string.Equals(pboost, "Off", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, true); }
-                        else if (string.Equals(pboost, "On", StringComparison.OrdinalIgnoreCase)) { pb.Boost = true; Native.SetProcessPriorityBoost(hp, false); }
+                        if (Native.GetPriorityClass(hp) != PRIO[cls]) { okPrio = Native.SetPriorityClass(hp, PRIO[cls]); changed = true; }
+                        if (Native.GetProcIo(hp) != IOP[io]) { stIo = Native.SetProcIo(hp, IOP[io]); changed = true; }
+                        if (Native.GetMemPrio(hp) != MEM[mem]) { okMem = Native.SetMemPrio(hp, MEM[mem], false); changed = true; }
+                        if (ecoOff)
+                        {
+                            pb.Eco = true;
+                            uint ec, es;
+                            bool already = Native.GetPowerThrottling(hp, out ec, out es) && (ec & 1) != 0 && (es & 1) == 0;
+                            if (!already) { okEco = Native.SetPowerThrottling(hp, false); changed = true; }
+                        }
+                        bool wantOff = string.Equals(pboost, "Off", StringComparison.OrdinalIgnoreCase), wantOn = string.Equals(pboost, "On", StringComparison.OrdinalIgnoreCase);
+                        if (wantOff || wantOn)
+                        {
+                            pb.Boost = true;
+                            bool disabled; Native.GetProcessPriorityBoost(hp, out disabled);
+                            if (disabled != wantOff) { Native.SetProcessPriorityBoost(hp, wantOff); changed = true; }
+                        }
                     }
                     uint rbClass = Native.GetPriorityClass(hp);
                     if (o.DoMask)
                     {
                         pb.AffSet = pb.SetsSet = true;
-                        okAff = Native.SetProcAffinity(hp, mask.Mask);
-                        okSets = Native.SetProcessDefaultCpuSets(hp, mask.SetIds, (uint)mask.SetIds.Length);
+                        if (Native.GetProcAffinity(hp) != mask.Mask) { okAff = Native.SetProcAffinity(hp, mask.Mask); changed = true; }
+                        string sets = string.Join(",", mask.SetIds);
+                        if (!string.Equals(pb.LastSets, sets, StringComparison.Ordinal))
+                        {
+                            okSets = Native.SetProcessDefaultCpuSets(hp, mask.SetIds, (uint)mask.SetIds.Length);
+                            if (okSets) pb.LastSets = sets;
+                            changed = true;
+                        }
                     }
                     ulong eff = Native.GetProcAffinity(hp);
 
                     _appliedGame.Add(p.Id);
-                    string rbName; PRIONAME.TryGetValue((int)rbClass, out rbName);
-                    log.Add(string.Format("[OK] {0} PID {1} L{2} class={3} (read-back {4}) io={5} mem={6} mask=0x{7:X} LP {8}{9}",
-                        target, p.Id, lvl, o.DoProcess ? cls : "keep", rbName ?? "?", o.DoProcess ? io : "keep", o.DoProcess ? mem : "keep",
-                        eff, Masks.MaskLps(eff), o.DoMask ? "" : " (mask not set)"));
+                    if (fresh || changed)
+                    {
+                        string rbName; PRIONAME.TryGetValue((int)rbClass, out rbName);
+                        log.Add(string.Format("[OK] {0} PID {1} L{2} class={3} (read-back {4}) io={5} mem={6} mask=0x{7:X} LP {8}{9}",
+                            target, p.Id, lvl, o.DoProcess ? cls : "keep", rbName ?? "?", o.DoProcess ? io : "keep", o.DoProcess ? mem : "keep",
+                            eff, Masks.MaskLps(eff), o.DoMask ? "" : " (mask not set)"));
+                    }
                     if (!okPrio) { log.Add("     ! SetPriorityClass failed"); report.Failures.Add("SetPriorityClass"); }
                     if (!okAff)  { log.Add("     ! SetProcessAffinityMask failed"); report.Failures.Add("SetProcessAffinityMask"); }
                     if (!okSets) { log.Add("     ! SetProcessDefaultCpuSets failed"); report.Failures.Add("SetProcessDefaultCpuSets"); }
@@ -552,12 +590,27 @@ namespace Grobyq
                 {
                     if (o.Warmup) { Snapshot(p.Id); Thread.Sleep(700); }
                     var snap = Snapshot(p.Id);
-                    if (!snap.Ok || snap.Rows.Count == 0) { log.Add("[!!] threads not accessible"); }
+                    if (!snap.Ok || snap.Rows.Count == 0) { AdviceOnce(log, "nothr:" + p.Id, "[!!] threads not accessible"); }
                     else
                     {
                         var cand = Masks.IdealCandidates(topo, o.SkipCpu0, mask.Mask);
                         var done = new HashSet<uint>();
+                        string pre = p.Id + ":";
+                        var alive = new HashSet<string>(snap.Rows.Select(r => pre + r.Tid));
+                        // LPs already given to live threads of this game: a new thread gets a free one (no two hot threads
+                        // share an Ideal CPU while there are candidates left)
+                        var usedLps = new HashSet<uint>(_ideal.Where(kv => alive.Contains(kv.Key)).Select(kv => kv.Value));
                         int ci = 0;
+                        Func<uint> nextLp = () =>
+                        {
+                            for (int k = 0; k < cand.Count; k++)
+                            {
+                                uint lp = cand[(ci + k) % cand.Count].LP;
+                                if (!usedLps.Contains(lp)) { ci += k + 1; usedLps.Add(lp); return lp; }
+                            }
+                            uint wrap = cand[ci % cand.Count].LP; ci++;
+                            return wrap;
+                        };
 
                         // threads that start in an anti-cheat module are never touched (named rules and hot threads)
                         foreach (var ac in snap.Rows.Select(r => ModuleOf(r.Sym)).Where(IsAntiCheat).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -578,71 +631,104 @@ namespace Grobyq
                                     if (ht == IntPtr.Zero) continue;
                                     try
                                     {
-                                        string tkey2 = p.Id + ":" + r.Tid;
+                                        string tkey2 = pre + r.Tid;
                                         var tb = ThreadBaseline(tkey2, ht);
                                         Debug.Assert(_thrBefore.ContainsKey(tkey2), "thread baseline must be captured before any set");
                                         var acts = new List<string>();
-                                        int fixedLp;
+                                        int fixedLp; uint had;
+                                        // Ideal CPU: given once per thread for the session (a later pass keeps it)
                                         if (rule.Ideal == "auto")
                                         {
-                                            uint lp = cand[ci % cand.Count].LP; ci++;
-                                            Native.SetThreadIdealProcessor(ht, lp);
-                                            acts.Add("idealCPU=" + lp);
+                                            if (!_ideal.TryGetValue(tkey2, out had))
+                                            {
+                                                uint lp = nextLp();
+                                                Native.SetThreadIdealProcessor(ht, lp);
+                                                _ideal[tkey2] = lp;
+                                                acts.Add("idealCPU=" + lp);
+                                            }
                                         }
                                         else if (int.TryParse(rule.Ideal, out fixedLp) && fixedLp >= 0 && fixedLp < topo.LogicalCount)
                                         {
-                                            Native.SetThreadIdealProcessor(ht, (uint)fixedLp);
-                                            acts.Add("idealCPU=" + fixedLp + " (fixed)");
+                                            if (!_ideal.TryGetValue(tkey2, out had) || had != (uint)fixedLp)
+                                            {
+                                                Native.SetThreadIdealProcessor(ht, (uint)fixedLp);
+                                                _ideal[tkey2] = (uint)fixedLp;
+                                                acts.Add("idealCPU=" + fixedLp + " (fixed)");
+                                            }
                                         }
                                         int tp;
                                         if (ThreadPrio(rule.Prio, adv, out tp))
-                                        { MarkPrio(tb, ht); acts.Add(Native.SetThreadPriority(ht, tp) ? "prio=" + rule.Prio + (tp == TimeCriticalValue ? " (15, Advanced)" : "") : "prio=FAIL"); }
-                                        if (string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase))
-                                        { MarkBoost(tb, ht); acts.Add(Native.SetThreadPriorityBoost(ht, true) ? "boost=off" : "boost=FAIL"); }
-                                        else if (string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase))
-                                        { MarkBoost(tb, ht); acts.Add(Native.SetThreadPriorityBoost(ht, false) ? "boost=on" : "boost=FAIL"); }
+                                        {
+                                            MarkPrio(tb, ht);
+                                            if (Native.GetThreadPriority(ht) != tp)
+                                                acts.Add(Native.SetThreadPriority(ht, tp) ? "prio=" + rule.Prio + (tp == TimeCriticalValue ? " (15, Advanced)" : "") : "prio=FAIL");
+                                        }
+                                        bool wantOff = string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase), wantOn = string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase);
+                                        if (wantOff || wantOn)
+                                        {
+                                            MarkBoost(tb, ht);
+                                            bool disabled; Native.GetThreadPriorityBoost(ht, out disabled);
+                                            if (disabled != wantOff) acts.Add(Native.SetThreadPriorityBoost(ht, wantOff) ? (wantOff ? "boost=off" : "boost=on") : "boost=FAIL");
+                                        }
                                         done.Add(r.Tid); nThread++; report.NamedHits++;
-                                        log.Add(string.Format("[TH] {0,-24} TID {1,-7} {2,12} c/s  {3}", rname, r.Tid, r.Rate, string.Join(" ", acts)));
+                                        if (acts.Count > 0) log.Add(string.Format("[TH] {0,-24} TID {1,-7} {2,12} c/s  {3}", rname, r.Tid, r.Rate, string.Join(" ", acts)));
                                     }
                                     finally { Native.CloseHandle(ht); }
                                 }
                             }
                         }
 
-                        // F3: never hand out more slots than candidate cores, in the engine
-                        int slotsLeft = cand.Count - ci; if (slotsLeft < 1) slotsLeft = 1;
-                        int effTopN = topN;
-                        if (effTopN > slotsLeft)
-                        {
-                            AdviceOnce(log, "topn:" + target, string.Format("[i ] Hot threads {0} -> {1}: only {2} candidate cores, {3} taken by named rules", topN, slotsLeft, cand.Count, ci));
-                            effTopN = slotsLeft;
-                        }
                         // unnamed hot threads need a KNOWN, non-anti-cheat start module (fail closed: an unreadable module
                         // list - VM_READ stripped - could hide an injected anti-cheat DLL)
                         if (snap.Rows.Count > 0 && snap.Rows.All(r => ModuleOf(r.Sym).Length == 0))
                             AdviceOnce(log, "nomods:" + target, string.Format("[THR] {0}: thread modules unreadable - thread rules and hot threads skipped (an anti-cheat module cannot be ruled out); process priority and cores still apply", target));
-                        var hot = snap.Rows.Where(r => !done.Contains(r.Tid) && SafeThread(r)).Take(effTopN).ToList();
-                        bool first = done.Count == 0;
+
+                        // Hot threads, sticky for the session: a picked thread keeps its Ideal CPU and priority; only threads
+                        // without one can be picked, up to the hot-thread count. A picked thread that stays idle for ~5
+                        // passes frees its slot (its hint stays - harmless), so the pick follows menu -> match without
+                        // reshuffling the threads that are busy right now.
+                        ulong top = snap.Rows.Count > 0 ? snap.Rows[0].Rate : 0;
+                        foreach (var k in _hotPick.Where(x => x.StartsWith(pre, StringComparison.Ordinal)).ToList())
+                        {
+                            if (!alive.Contains(k)) { _hotPick.Remove(k); _hotIdle.Remove(k); continue; }
+                            var row = snap.Rows.First(r => pre + r.Tid == k);
+                            bool idle = top > 0 && row.Rate < top / 100;
+                            int n2; _hotIdle.TryGetValue(k, out n2);
+                            n2 = idle ? n2 + 1 : 0;
+                            if (n2 >= 5) { _hotPick.Remove(k); _hotIdle.Remove(k); } else _hotIdle[k] = n2;
+                        }
+                        int picked = _hotPick.Count(x => x.StartsWith(pre, StringComparison.Ordinal));
+                        int slots = Math.Max(1, cand.Count - done.Count);
+                        int effTopN = Math.Min(topN, slots);
+                        if (effTopN < topN)
+                            AdviceOnce(log, "topn:" + target, string.Format("[i ] Hot threads {0} -> {1}: only {2} candidate cores, {3} taken by named rules", topN, effTopN, cand.Count, done.Count));
+                        int room = Math.Max(0, effTopN - picked);
+                        var hot = room == 0 ? new List<ThreadRow>() :
+                            snap.Rows.Where(r => !done.Contains(r.Tid) && SafeThread(r) && !_hotPick.Contains(pre + r.Tid) && !_ideal.ContainsKey(pre + r.Tid) && r.Rate > 0).Take(room).ToList();
+                        bool first = done.Count == 0 && picked == 0;
                         foreach (var r in hot)
                         {
-                            uint lp = cand[ci % cand.Count].LP; ci++;
                             IntPtr ht = Native.OpenThreadOf(p.Id, r.Tid);
                             if (ht == IntPtr.Zero) continue;
                             try
                             {
-                                string tkey2 = p.Id + ":" + r.Tid;
+                                string tkey2 = pre + r.Tid;
                                 var tb = ThreadBaseline(tkey2, ht);
+                                uint lp = nextLp();
                                 Native.SetThreadIdealProcessor(ht, lp);
+                                _ideal[tkey2] = lp;
+                                _hotPick.Add(tkey2); _hotIdle[tkey2] = 0;
                                 string ptxt = "-";
                                 string want = first ? (preset != null ? preset.HotFirst : "AboveNormal") : (preset != null ? preset.HotOthers : "");
                                 int wp;
-                                if (ThreadPrio(want, adv, out wp)) { MarkPrio(tb, ht); if (Native.SetThreadPriority(ht, wp)) ptxt = want; }
+                                if (ThreadPrio(want, adv, out wp)) { MarkPrio(tb, ht); if (Native.GetThreadPriority(ht) == wp || Native.SetThreadPriority(ht, wp)) ptxt = want; }
                                 first = false;
-                                nThread++; report.CycleFallbackTids.Add((int)r.Tid);
+                                report.CycleFallbackTids.Add((int)r.Tid);
                                 log.Add(string.Format("[TH] {0,-24} TID {1,-7} {2,12} c/s  idealCPU={3} prio={4} {5}", "(by cycles)", r.Tid, r.Rate, lp, ptxt, r.Sym));
                             }
                             finally { Native.CloseHandle(ht); }
                         }
+                        nThread += _hotPick.Count(x => x.StartsWith(pre, StringComparison.Ordinal));
                     }
                 }
             }
@@ -765,21 +851,26 @@ namespace Grobyq
                         uint clsV;
                         if (!PRIO.TryGetValue(clsB, out clsV) || string.Equals(clsB, "Realtime", StringComparison.OrdinalIgnoreCase) || string.Equals(clsB, "High", StringComparison.OrdinalIgnoreCase))
                         { clsB = "BelowNormal"; clsV = PRIO[clsB]; }
-                        Native.SetPriorityClass(hp, clsV);
-                        Native.SetProcIo(hp, IOP["VeryLow"]);
-                        Native.SetMemPrio(hp, MEM["Low"], false);
+                        bool bgChanged = false;
+                        if (Native.GetPriorityClass(hp) != clsV) { Native.SetPriorityClass(hp, clsV); bgChanged = true; }
+                        if (Native.GetProcIo(hp) != IOP["VeryLow"]) { Native.SetProcIo(hp, IOP["VeryLow"]); bgChanged = true; }
+                        if (Native.GetMemPrio(hp) != MEM["Low"]) { Native.SetMemPrio(hp, MEM["Low"], false); bgChanged = true; }
                         string mtxt = "mask untouched";
                         bool ruled = AffRules.ContainsKey(b) || AffRules.ContainsKey(bn + ".exe");      // a per-process rule wins
-                        if (bgAffinity && !ruled) { bb.BgAff = true; Native.SetProcAffinity(hp, bgMask); mtxt = "mask=0x" + bgMask.ToString("X"); }
+                        if (bgAffinity && !ruled)
+                        {
+                            bb.BgAff = true; mtxt = "mask=0x" + bgMask.ToString("X");
+                            if (Native.GetProcAffinity(hp) != bgMask) { Native.SetProcAffinity(hp, bgMask); bgChanged = true; }
+                        }
                         else if (bb.BgAff && !bb.AffSet)
                         {
                             // pinning switched off (or a Baseline template): the pinned process gets its own cores back
                             Native.SetProcAffinity(hp, bb.Aff != 0 ? bb.Aff : SafeFull());
-                            bb.BgAff = false; mtxt = "cores restored";
+                            bb.BgAff = false; mtxt = "cores restored"; bgChanged = true;
                         }
                         else if (ruled) mtxt = "mask = its affinity rule";
                         _appliedBg.Add(bp.Id); n++;
-                        log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io VeryLow / {3}", bp.ProcessName, bp.Id, clsB, mtxt));
+                        if (bgChanged) log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io VeryLow / {3}", bp.ProcessName, bp.Id, clsB, mtxt));
                     }
                     finally { Native.CloseHandle(hp); }
                 }
@@ -861,6 +952,7 @@ namespace Grobyq
             if (o.Game && o.DoAffRules) foreach (var l in ApplyAffRules()) log.Add(l);
             if ((o.Game && Settings.GetBool("ApplyAllPresets")) || (o.Sys && SystemPresets.Count > 0)) foreach (var l in ApplyImportedPresets(o)) log.Add(l);
             UpdateSysStats();
+            UpdateGameStats();
 
             if (found.Count == 0)
             {
@@ -869,15 +961,10 @@ namespace Grobyq
                 return log;
             }
 
-            // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer);
-            // the profile's list only while the game has focus, the user's list as "Release background on alt-tab" says
+            // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer).
+            // ApplyAll runs only inside a game session (Optimizer), which already encodes "the game is in front".
             bool userBg = o.Game && o.DoBackground, sysBg = o.Sys && SystemBg.Count > 0;
-            if (userBg || sysBg)
-            {
-                bool wantBg = (!userBg || o.BgForeground) ? GameForeground() : true;
-                if (wantBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
-                else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
-            }
+            if (userBg || sysBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
             else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
             return log;
         }
@@ -906,6 +993,17 @@ namespace Grobyq
         private readonly HashSet<int> _sysPids = new HashSet<int>();
         public int SysProcCount { get; private set; }
         public int SysThreadCount { get; private set; }
+        private void UpdateGameStats()
+        {
+            int thr = 0;
+            foreach (var kv in _thrBefore)
+            {
+                int c = kv.Key.IndexOf(':'), pid;
+                if (c > 0 && int.TryParse(kv.Key.Substring(0, c), out pid) && _gamePids.Contains(pid) && (kv.Value.PrioSet || kv.Value.BoostSet || _ideal.ContainsKey(kv.Key))) thr++;
+            }
+            GameThreadCount = thr;
+        }
+
         private void UpdateSysStats()
         {
             int procs = 0, thr = 0;
@@ -1165,11 +1263,17 @@ namespace Grobyq
                         string key = pid + ":" + r.Tid;
                         var tb = ThreadBaseline(key, ht);
                         Debug.Assert(_thrBefore.ContainsKey(key), "thread baseline must be captured before any set");
-                        int tp;
-                        if (ThreadPrio(rule.Prio, adv, out tp)) { MarkPrio(tb, ht); Native.SetThreadPriority(ht, tp); }
-                        if (string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase)) { MarkBoost(tb, ht); Native.SetThreadPriorityBoost(ht, true); }
-                        else if (string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase)) { MarkBoost(tb, ht); Native.SetThreadPriorityBoost(ht, false); }
-                        _appliedGame.Add(pid); hitN++;
+                        int tp; bool did = false;
+                        if (ThreadPrio(rule.Prio, adv, out tp)) { MarkPrio(tb, ht); if (Native.GetThreadPriority(ht) != tp) { Native.SetThreadPriority(ht, tp); did = true; } }
+                        bool wantOff = string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase), wantOn = string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase);
+                        if (wantOff || wantOn)
+                        {
+                            MarkBoost(tb, ht);
+                            bool disabled; Native.GetThreadPriorityBoost(ht, out disabled);
+                            if (disabled != wantOff) { Native.SetThreadPriorityBoost(ht, wantOff); did = true; }
+                        }
+                        _appliedGame.Add(pid);
+                        if (did) hitN++;
                     }
                     finally { Native.CloseHandle(ht); }
                 }
@@ -1288,7 +1392,8 @@ namespace Grobyq
             }
             _appliedGame.Clear(); _appliedBg.Clear(); _sysPids.Clear();
             _procBefore.Clear(); _thrBefore.Clear(); _born.Clear();
-            SysProcCount = 0; SysThreadCount = 0;
+            _ideal.Clear(); _hotPick.Clear(); _hotIdle.Clear(); _gamePids.Clear();
+            SysProcCount = 0; SysThreadCount = 0; GameThreadCount = 0;
             _presetTidCount.Clear();   // Lever-3 guard: a disable must force the next enable to re-apply imported presets
             BgOn = false; LastThreads = 0; LastBg = 0; LiveTarget = "";
             log.Add("[i] Thread Ideal Processor is only a hint; a full thread-layer reset = restart the game. Harmless to leave.");
@@ -1307,6 +1412,11 @@ namespace Grobyq
             foreach (var k in _appliedGame.ToList()) if (!alive.Contains(k)) _appliedGame.Remove(k);
             foreach (var k in _appliedBg.ToList()) if (!alive.Contains(k)) _appliedBg.Remove(k);
             foreach (var k in _sysPids.ToList()) if (!alive.Contains(k)) _sysPids.Remove(k);
+            foreach (var k in _gamePids.ToList()) if (!alive.Contains(k)) _gamePids.Remove(k);
+            Func<string, bool> deadKey = k => { int c = k.IndexOf(':'), pp; return c > 0 && int.TryParse(k.Substring(0, c), out pp) && !alive.Contains(pp); };
+            foreach (var k in _ideal.Keys.Where(deadKey).ToList()) _ideal.Remove(k);
+            _hotPick.RemoveWhere(k => deadKey(k));
+            foreach (var k in _hotIdle.Keys.Where(deadKey).ToList()) _hotIdle.Remove(k);
             foreach (var k in _procBefore.Keys.ToList()) if (!alive.Contains(k)) _procBefore.Remove(k);
             foreach (var k in _born.Keys.ToList()) if (!alive.Contains(k)) _born.Remove(k);
             foreach (var k in _presetTidCount.Keys.ToList()) if (!alive.Contains(k)) _presetTidCount.Remove(k);
