@@ -131,6 +131,12 @@ namespace Grobyq
                 case "bolt-dot":
                     Dot(4, 4, 8, 8);
                     break;
+                case "up":
+                    Poly(false, 3.5, 10.5, 8, 5.5, 12.5, 10.5);
+                    break;
+                case "down":
+                    Poly(false, 3.5, 5.5, 8, 10.5, 12.5, 5.5);
+                    break;
                 case "power":
                     OpenRing(8, 8.7, 5.6, 40);
                     Ln(8, 1.8, 8, 7.4);

@@ -14,7 +14,7 @@ namespace Grobyq.Pages
     // at once and keep their position, the same switches as in the tray menu. Below: the games the game optimizer waits
     // for and WHAT it may change. v4 manual mode: every part starts off, edits are a draft until Save (Cancel throws the
     // draft away); Save while an optimizer runs restores every baseline and applies only the saved parts.
-    public sealed class ThreadsPage : PageBase
+    public sealed partial class ThreadsPage : PageBase
     {
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
@@ -93,6 +93,9 @@ namespace Grobyq.Pages
             var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
             toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
             card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff, false));
+
+            // ---- the picked game's preset and thread rules (ThreadsPage.Preset.cs) ----
+            BuildPreset();
 
             // ---- background processes ----
             Title(L.T("Background processes"));
@@ -232,6 +235,7 @@ namespace Grobyq.Pages
         private void GamesChanged()
         {
             FillGames();
+            FillPick();
             Draft("WatchList", string.Join(" ", _games));
             var keep = _labels.Where(kv => _games.Any(x => string.Equals(x, kv.Key, StringComparison.OrdinalIgnoreCase)))
                               .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
@@ -302,19 +306,20 @@ namespace Grobyq.Pages
 
         private void UpdateSaveBar(string done)
         {
-            bool dirty = _draft.Count > 0;
+            int changes = _draft.Count + DirtyPresets().Count;
+            bool dirty = changes > 0;
             bool noGame = _games.Count == 0;
             _save.IsEnabled = dirty && !noGame;
             _cancel.IsEnabled = dirty;
             if (noGame) { _saveText.Text = L.T("Pick at least one game."); _saveText.Foreground = Ui.B("Warn"); }
-            else if (dirty) { _saveText.Text = L.F("Unsaved changes: {0}", _draft.Count); _saveText.Foreground = Ui.B("Warn"); }
+            else if (dirty) { _saveText.Text = L.F("Unsaved changes: {0}", changes); _saveText.Foreground = Ui.B("Warn"); }
             else if (done != null) { _saveText.Text = done; _saveText.Foreground = Ui.B("Ok"); }
             else { _saveText.Text = L.T("Edit, then Save. The switches at the top turn the optimizers on and off at once."); _saveText.Foreground = Ui.B("Dim"); }
         }
 
         private void SaveDraft()
         {
-            if (_draft.Count == 0 || _games.Count == 0) return;
+            if ((_draft.Count == 0 && DirtyPresets().Count == 0) || _games.Count == 0) return;
             var parts = new List<string>();
             foreach (var kv in _draft)
             {
@@ -322,7 +327,8 @@ namespace Grobyq.Pages
                 parts.Add(kv.Key + "=" + kv.Value);
             }
             _draft.Clear();
-            AppLog.Add("[i] saved: " + string.Join(", ", parts));
+            if (parts.Count > 0) AppLog.Add("[i] saved: " + string.Join(", ", parts));
+            SavePresets();
             var o = Optimizer.Instance;
             bool active = o != null && o.Active;
             if (o != null) o.Reapply();
@@ -333,6 +339,7 @@ namespace Grobyq.Pages
         private void CancelDraft()
         {
             _draft.Clear();
+            _edit.Clear();
             Resync();
             UpdateSaveBar(null);
         }
@@ -352,6 +359,7 @@ namespace Grobyq.Pages
             }
             finally { _loading = false; }
             FillGames();
+            FillPick();
         }
 
         // ------------------------------------------------------------------ state
