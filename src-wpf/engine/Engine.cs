@@ -1141,9 +1141,9 @@ namespace Grobyq
             finally { Native.CloseHandle(hp); }
         }
 
-        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool adv, bool sys, out int hits)
+        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool adv, bool sys, out int setCount)
         {
-            hits = 0;
+            setCount = 0;
             bool prot = IsProtected(preset.Exe);
             var log = new List<string>();
             var snap = Snapshot(pid);
@@ -1175,7 +1175,7 @@ namespace Grobyq
                 }
             }
             if (hitN > 0) log.Add(string.Format("[TH] {0} PID {1}: {2} thread(s) set by {3} (priority only)", preset.Exe, pid, hitN, sys ? "the system profile" : "its preset"));
-            hits = hitN;
+            setCount = hitN;
             return log;
         }
 
