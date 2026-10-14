@@ -373,12 +373,13 @@ namespace Grobyq
             _pidCache = d;
         }
 
-        // ---- starvation guard (on by default) ----
-        // The processes a game waits on - Windows' protected ones (DWM, csrss, services...) and Steam (the game's Steam API
-        // calls are IPC round trips to steam.exe) - never go below "Below normal": under the game, above the lowered
-        // background apps. A thread at Idle (priority 1) loses every contest to a busy background app (an Idle-class
-        // browser runs at 4-6) and gets the CPU only when Windows' starvation boost lifts it after ~4 s: a game waiting
-        // on it freezes for seconds.
+        // ---- starvation guard (opt-in, OFF by default) ----
+        // Off: the system profile runs as written - its -15 / 200 / 300 rules put DWM, service and Steam threads at Idle,
+        // the core of the gaming profile; the clean game mode closes the busy apps that could compete with them.
+        // On: the processes a game waits on - Windows' protected ones (DWM, csrss, services...) and Steam (the game's Steam
+        // API calls are IPC round trips to steam.exe) - never go below "Below normal". Why it exists: a thread at Idle
+        // (priority 1) loses every contest to a busy background app (an Idle-class browser runs at 4-6) and gets the CPU
+        // only when Windows' starvation boost lifts it after ~4 s - a game waiting on it can freeze for seconds.
         public static readonly HashSet<string> Companions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "steam", "steamservice", "steamwebhelper", "gameoverlayui" };
         public static bool StarveGuard { get { return Settings.GetBool("StarveGuard"); } }

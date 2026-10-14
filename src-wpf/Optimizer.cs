@@ -68,6 +68,7 @@ namespace Grobyq
             try { var m = Store.Migrate362(Eng); if (m != null && m.Count > 0) AppLog.Add(m); } catch { }
             try { var m2 = Store.MigrateNormalClass(Eng); if (m2 != null && m2.Count > 0) AppLog.Add(m2); } catch { }
             try { string m3 = Settings.MigrateSessionDefault(); if (m3.Length > 0) AppLog.Add(m3); } catch { }
+            try { string m4 = Settings.MigrateGuardDefault(); if (m4.Length > 0) AppLog.Add(m4); } catch { }
 
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }

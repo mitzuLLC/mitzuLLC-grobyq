@@ -73,7 +73,7 @@ namespace Grobyq.Pages
                 AppLog.Add("[UI] freeze guard = " + (on ? "on" : "off"));
                 var o = Optimizer.Instance; if (o != null) o.ApplyNow();      // in a game session: restore, apply with the new rule
             };
-            top.Add(Ui.Row(L.T("Freeze guard"), L.T("Recommended on. DWM, Windows services and Steam never go below Below normal: under the game, above the background apps. Without it a busy browser can starve a thread the game waits on, and the game freezes for seconds."), _guardSw, false));
+            top.Add(Ui.Row(L.T("Freeze guard"), L.T("Off by default: the profile runs as written - its -15 / 200 / 300 rules put DWM, Windows services and Steam threads at the lowest priority. On: they never go below Below normal - a fallback if the game freezes for seconds while a busy app (a browser) stays open. Closing such apps with the clean game mode is the better fix."), _guardSw, false));
 
             // ---- games ----
             Title(L.T("Games"));

@@ -124,7 +124,10 @@ namespace Grobyq
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
                 { "AllowProtectedPriority", "0" }, // Advanced: priority on protected system processes (off by default)
-                { "StarveGuard", "1" },           // DWM, Windows services and Steam never below Below normal (the game waits on them)
+                // Freeze guard, OFF by default: the system profile runs as written - its -15 / 200 / 300 rules put DWM,
+                // Windows services and Steam threads at Idle, which is the point of the gaming profile. On = those never
+                // go below Below normal (a fallback for a match played with a busy app left open).
+                { "StarveGuard", "0" },
                 { "RestoreOnExit", "1" },
                 { "AdvancedThreadMode", "0" },    // TimeCritical (15) selectable in thread rules (Advanced, warned)
                 { "LogOpen", "0" },            // the log starts folded: in a normal window the pages keep their full height
@@ -192,6 +195,17 @@ namespace Grobyq
             Reset("BgForeground");
             Set("MigratedSession", "1");
             return had ? "[i] session rule: now follows the game process (applied at launch, kept through alt-tab, restored when the game exits); 'Only while the game is in front' on Threads brings the foreground mode back" : "";
+        }
+
+        // One-time move to the freeze guard default OFF: an install that stored it on (alpha.5 default, or an A/B toggle) gets
+        // the profile's lowest-priority rules back as written. The switch stays on Threads. Returns a log line, or "".
+        public static string MigrateGuardDefault()
+        {
+            if (Get("MigratedGuard") == "1") return "";
+            bool had = Stored("StarveGuard") && GetBool("StarveGuard");
+            Reset("StarveGuard");
+            Set("MigratedGuard", "1");
+            return had ? "[i] freeze guard: off by default now - the system profile's -15 / 200 / 300 rules run as written (Idle); the switch on Threads turns the guard back on" : "";
         }
 
         // Back to the first-run default: the stored value is removed, so Get answers the default again.
