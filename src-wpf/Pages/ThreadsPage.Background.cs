@@ -181,9 +181,9 @@ namespace Grobyq.Pages
             if (!Dlg.Ask(Window.GetWindow(this), L.T("Reset the thread settings? Both optimizers turn off and every change goes back to its Windows default; the games, parts, game presets and the background list return to the first-run defaults. Affinity and the app settings stay."), true)) return;
             var o = Optimizer.Instance;
             if (o != null) o.StopAll();
-            Settings.Reset("WatchList", "GameLabels", "DoProcess", "DoThreads", "PeriodicReapply", "Period", "TopN",
-                           "DoBackground", "CloseBackground", "BgAffinity", "BgForeground", "BgProcs", "ApplyAllPresets", "AllowProtectedPriority",
-                           "AdvancedThreadMode", "GameOpt", "SystemThreadOpt", "AutoEnable", "StarveGuard");
+            Settings.Reset("WatchList", "GameLabels", "DoThreads", "Period", "TopN",
+                           "DoBackground", "CloseBackground", "BgAffinity", "BgProcs", "ApplyAllPresets", "AllowProtectedPriority",
+                           "AdvancedThreadMode", "GameOpt", "SystemThreadOpt", "AutoEnable");
             if (o != null)
             {
                 o.Eng.UnderLock(() => { o.Eng.Presets = Store.Defaults(); o.Eng.BgClasses = Store.DefaultBg(); });

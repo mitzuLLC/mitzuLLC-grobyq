@@ -317,7 +317,6 @@ namespace Grobyq
             string targets = o != null && o.Eng.Targets != null ? string.Join(", ", o.Eng.Targets) : "cs2.exe";
             _sub.Text = state == "OFF" ? L.T("Optimizers are off")
                       : state == "ACTIVE" ? L.F("optimizing {0}", live)
-                      : !string.IsNullOrEmpty(live) ? L.F("{0} is minimized - normal mode", live)
                       : L.F("waiting for {0}", targets);
         }
 

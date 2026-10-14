@@ -30,5 +30,10 @@ namespace Grobyq
         {
             get { try { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } catch { return "?"; } }
         }
+
+        // Release stage shown next to the number. Numbering: 4.0.1 ... 4.0.9, then 4.1.0; alpha -> beta -> release (planned
+        // around 8.0). The GitHub tag carries it too (v4.0.1-alpha = a pre-release).
+        public const string Stage = "alpha";
+        public static string VersionText { get { return Version + (Stage.Length > 0 ? " " + Stage : ""); } }
     }
 }

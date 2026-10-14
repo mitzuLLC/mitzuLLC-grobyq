@@ -38,7 +38,7 @@ namespace Grobyq.Pages
             pickRow.Children.Add(_pick);
             pickRow.Children.Add(builtin);
             pickRow.Height = 30;
-            card.Add(Ui.Row(L.T("Game"), L.T("Pick the game to tune. Its preset is used when the game threads optimizer applies it (process priority and thread parts switched on above)."), pickRow));
+            card.Add(Ui.Row(L.T("Game"), L.T("Pick the game to tune. While the game threads optimizer runs, the process part below (class, I/O, memory, EcoQoS, boost) always applies - Normal means unchanged; the thread priorities and rules apply when Optimize threads is on."), pickRow));
 
             _cls = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("AboveNormal", L.T("Above normal")), new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Idle", L.T("Idle")) });
             card.Add(ComboRow(L.T("Priority class"), Explain.Class("High"), _cls, out _clsDesc));

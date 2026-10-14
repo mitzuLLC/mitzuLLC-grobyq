@@ -19,7 +19,7 @@ namespace Grobyq.Pages
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
 
-        private readonly CheckBox _gameSw, _sysSw, _frontSw, _guardSw, _closeSw;
+        private readonly CheckBox _gameSw, _sysSw, _closeSw;
         private readonly Ellipse _gameDot, _sysDot;
         private readonly TextBlock _gameStat, _sysStat;
         private readonly Dictionary<string, BoxCheck> _known = new Dictionary<string, BoxCheck>(StringComparer.OrdinalIgnoreCase);
@@ -53,27 +53,7 @@ namespace Grobyq.Pages
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
                 L.T("grobyq's built-in profile while a game runs: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
-                _sysSw, out _sysDot, out _sysStat, true));
-            // WHEN both apply: acts at once, like the switches above
-            _frontSw = Ui.Switch(Settings.GetBool("BgForeground"));
-            _frontSw.Click += (s, e) =>
-            {
-                bool on = _frontSw.IsChecked == true;
-                Settings.SetBool("BgForeground", on);
-                AppLog.Add("[UI] only while the game is in front = " + (on ? "on" : "off"));
-                var o = Optimizer.Instance; if (o != null) o.Refresh();
-                UpdateState();
-            };
-            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Off (default): applied once when the game starts and kept until it closes - alt-tab costs nothing, nothing is re-applied when you come back. On: minimize or alt-tab puts everything back to normal; back in the game - applied again."), _frontSw));
-            _guardSw = Ui.Switch(Settings.GetBool("StarveGuard"));
-            _guardSw.Click += (s, e) =>
-            {
-                bool on = _guardSw.IsChecked == true;
-                Settings.SetBool("StarveGuard", on);
-                AppLog.Add("[UI] freeze guard = " + (on ? "on" : "off"));
-                var o = Optimizer.Instance; if (o != null) o.ApplyNow();      // in a game session: restore, apply with the new rule
-            };
-            top.Add(Ui.Row(L.T("Freeze guard"), L.T("Off by default: the profile runs as written - its -15 / 200 / 300 rules put DWM, Windows services and Steam threads at the lowest priority. On: they never go below Below normal - a fallback if the game freezes for seconds while a busy app (a browser) stays open. Closing such apps with the clean game mode is the better fix."), _guardSw, false));
+                _sysSw, out _sysDot, out _sysStat, false));
 
             // ---- games ----
             Title(L.T("Games"));
@@ -93,12 +73,10 @@ namespace Grobyq.Pages
             _addGame.Height = 28; _addGame.Padding = new Thickness(12, 0, 12, 0); _addGame.Margin = new Thickness(4, 0, 0, 6);
             _addGame.Click += (s, e) => AddGame();
 
-            // ---- what the game optimizer changes (each part off until you switch it on and Save) ----
+            // ---- what the game optimizer changes: the preset's process part always; the thread part with this switch ----
             Title(L.T("Game optimizer"));
             var card = Card();
-            card.Add(SwitchRow(L.T("Game process priority"), L.T("The game gets its preset class (Normal by default - raise it in the game preset; never Realtime), normal I/O and memory priority and EcoQoS off while it runs."), "DoProcess"));
             card.Add(SwitchRow(L.T("Optimize threads"), L.T("A scheduler hint for the game: Ideal CPU plus a priority on its busiest threads (named rules and hot threads). Off = no thread of the game is touched."), "DoThreads"));
-            card.Add(SwitchRow(L.T("Catch new threads"), L.T("While the game runs: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again."), "PeriodicReapply"));
             var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
             toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
             card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff, false));
@@ -372,8 +350,6 @@ namespace Grobyq.Pages
             try
             {
                 foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
-                if (_frontSw != null) _frontSw.IsChecked = Settings.GetBool("BgForeground");
-                if (_guardSw != null) _guardSw.IsChecked = Settings.GetBool("StarveGuard");
                 if (_closeSw != null) _closeSw.IsChecked = Settings.GetBool("CloseBackground");
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
@@ -399,8 +375,7 @@ namespace Grobyq.Pages
             bool userBg = game && Settings.GetBool("DoBackground");
 
             if (!game) Stat(_gameDot, _gameStat, "Faint", L.T("off - games are not touched"));
-            else if (string.IsNullOrEmpty(live)) Stat(_gameDot, _gameStat, "Warn", L.F("armed - waiting for {0}", targets));
-            else if (!session) Stat(_gameDot, _gameStat, "Warn", L.F("{0} is minimized - normal mode", live));
+            else if (string.IsNullOrEmpty(live) || !session) Stat(_gameDot, _gameStat, "Warn", L.F("armed - waiting for {0}", targets));
             else
             {
                 string t = L.F("optimizing {0}", live) + "   ·   " + L.F("threads: {0}", o.Eng.GameThreadCount);
@@ -409,7 +384,7 @@ namespace Grobyq.Pages
             }
 
             if (!sys) Stat(_sysDot, _sysStat, "Faint", L.T("off - system processes are not touched"));
-            else if (!session) Stat(_sysDot, _sysStat, "Warn", string.IsNullOrEmpty(live) ? L.T("waiting for a game - nothing is changed now") : L.F("{0} is minimized - normal mode", live));
+            else if (!session) Stat(_sysDot, _sysStat, "Warn", L.T("waiting for a game - nothing is changed now"));
             else
             {
                 string t = L.F("threads: {0}   ·   processes: {1}", o.Eng.SysThreadCount, o.Eng.SysProcCount);

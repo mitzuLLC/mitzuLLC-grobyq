@@ -63,8 +63,11 @@ namespace Grobyq
                 // starve the very threads it waits on (DWM, Steam IPC); the win comes from the thread rules and the
                 // background layer, not from a blanket class bump. Raise it per game in the preset if a title needs it.
                 var s2 = new Preset { Exe = exe, Class = "Normal", Io = "Normal", Mem = "Normal" };
-                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Ideal = "auto", Prio = "AboveNormal" });
-                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Ideal = "auto" });
+                // the frame's critical path - main thread (simulation) and render thread (submission to the driver) - one
+                // step above the game's own job workers and everything else at Normal: Highest = priority 10 in a Normal
+                // class, never TimeCritical. Each gets its own Ideal CPU. A/B it in CapFrameX (1% / 0.1% low), T2.
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Ideal = "auto", Prio = "Highest" });
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Ideal = "auto", Prio = "Highest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "embree3.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "phonon.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "video64.dll", Prio = "BelowNormal" });
@@ -88,7 +91,7 @@ namespace Grobyq
 
         public static Dictionary<string, string> DefaultBg()
         {
-            // steam.exe steps aside while the game has focus (Idle, as in the AerialOS profile); released on alt-tab / exit
+            // steam.exe steps aside while the game runs (Idle, as in the AerialOS profile); restored when the game exits
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "ctfmon.exe", "Idle" }, { "textinputhost.exe", "Idle" }, { "discord.exe", "Normal" }, { "steam.exe", "Idle" } };
         }
 
@@ -137,6 +140,33 @@ namespace Grobyq
             }
             if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
             Settings.Set("MigratedNormalClass", "1");
+            return log;
+        }
+
+        // One-time update (4.0.1): the built-in cs2 / dota2 preset raises the main and render threads to Highest. A saved
+        // preset whose rule still holds the OLD built-in value (MainThrd = Above normal, D3D11RenderThread = keep) follows;
+        // a rule the user set to anything else is left alone. Runs once.
+        public static List<string> MigrateHighThreads(Engine eng)
+        {
+            var log = new List<string>();
+            if (Settings.Get("MigratedHighThreads") == "1") return log;
+            bool any = false;
+            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
+            {
+                Preset p;
+                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
+                foreach (var r in p.Threads)
+                {
+                    if (!string.Equals(r.Match, "desc", StringComparison.OrdinalIgnoreCase)) continue;
+                    bool main = string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase) && string.Equals(r.Prio, "AboveNormal", StringComparison.OrdinalIgnoreCase);
+                    bool render = string.Equals(r.Pattern, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(r.Prio);
+                    if (!main && !render) continue;
+                    r.Prio = "Highest"; any = true;
+                    log.Add("[i] " + exe + ": " + r.Pattern + " -> Highest (4.0.1 built-in preset; change it in the game preset if you want)");
+                }
+            }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
+            Settings.Set("MigratedHighThreads", "1");
             return log;
         }
 
@@ -205,7 +235,7 @@ namespace Grobyq
         // "CloseBackground" (game mode) is deliberately NOT here: closing apps can lose unsaved work, so it stays a local,
         // per-PC opt-in. A profile may carry "Close" marks on background chips; they stay inert until this PC's switch is on.
         public static readonly string[] FlagKeys = { "DoThreads", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt", "DoBackground",
-                                                     "BgAffinity", "BgForeground", "PeriodicReapply", "AllowProtectedPriority", "AdvancedThreadMode" };
+                                                     "BgAffinity", "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly HashSet<string> GatedFlags = new HashSet<string> { "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly List<string> LastImportWants = new List<string>();
 

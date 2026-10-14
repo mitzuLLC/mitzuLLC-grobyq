@@ -105,17 +105,13 @@ namespace Grobyq
                 { "TopN", "4" },
                 { "Period", "2000" },            // 2 s: 1 s is re-scan overhead, 5 s can miss threads spawned on map load
                 { "BgAffinity", "1" },
-                // v4.0: the session follows the game PROCESS - applied once at launch, kept through alt-tab, restored when the
-                // game exits. On = the old foreground mode (minimize / alt-tab restores, back in the game applies again).
-                { "BgForeground", "0" },
                 { "BgProcs", DefaultBgProcs },
-                // v4 manual mode: a first run changes NOTHING. The optimizer does not arm at start and every optimization
-                // switch starts off; the user picks what to apply, presses Save, then ENABLE. Mechanism settings (period,
-                // hot thread count, CPU 0 avoidance, alt-tab release) keep their defaults: they only act on a chosen part.
+                // v4 manual mode: a first run changes NOTHING. Both optimizers start off and every optional part is off;
+                // the user picks what to apply and presses Save. The session always follows the game process (applied at
+                // launch, caught up every 2 s, restored when the game exits); mechanism settings (period, hot thread count)
+                // keep their defaults - they only act on a chosen part.
                 { "AutoEnable", "0" },
                 { "CloseToTray", "1" },
-                { "PeriodicReapply", "1" },
-                { "DoProcess", "0" },             // game process priority (class / I/O / memory / EcoQoS)
                 { "DoMask", "0" },                // game core mask (affinity + CPU sets)
                 { "DoThreads", "0" },
                 { "DoBackground", "0" },
@@ -124,10 +120,6 @@ namespace Grobyq
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
                 { "AllowProtectedPriority", "0" }, // Advanced: priority on protected system processes (off by default)
-                // Freeze guard, OFF by default: the system profile runs as written - its -15 / 200 / 300 rules put DWM,
-                // Windows services and Steam threads at Idle, which is the point of the gaming profile. On = those never
-                // go below Below normal (a fallback for a match played with a busy app left open).
-                { "StarveGuard", "0" },
                 { "RestoreOnExit", "1" },
                 { "AdvancedThreadMode", "0" },    // TimeCritical (15) selectable in thread rules (Advanced, warned)
                 { "LogOpen", "0" },            // the log starts folded: in a normal window the pages keep their full height
@@ -183,29 +175,6 @@ namespace Grobyq
                     if (k != null) k.SetValue(name, value ?? "", RegistryValueKind.String);
             }
             catch { }
-        }
-
-        // One-time move to the v4.0 session rule (the game process, not the foreground): an install that stored the old
-        // foreground mode - a v3.6.8 profile import or the old alt-tab switch - gets the new default once. The switch stays on
-        // Threads for anyone who wants the foreground mode back. Returns a log line, or "" when nothing changed.
-        public static string MigrateSessionDefault()
-        {
-            if (Get("MigratedSession") == "1") return "";
-            bool had = Stored("BgForeground") && GetBool("BgForeground");
-            Reset("BgForeground");
-            Set("MigratedSession", "1");
-            return had ? "[i] session rule: now follows the game process (applied at launch, kept through alt-tab, restored when the game exits); 'Only while the game is in front' on Threads brings the foreground mode back" : "";
-        }
-
-        // One-time move to the freeze guard default OFF: an install that stored it on (alpha.5 default, or an A/B toggle) gets
-        // the profile's lowest-priority rules back as written. The switch stays on Threads. Returns a log line, or "".
-        public static string MigrateGuardDefault()
-        {
-            if (Get("MigratedGuard") == "1") return "";
-            bool had = Stored("StarveGuard") && GetBool("StarveGuard");
-            Reset("StarveGuard");
-            Set("MigratedGuard", "1");
-            return had ? "[i] freeze guard: off by default now - the system profile's -15 / 200 / 300 rules run as written (Idle); the switch on Threads turns the guard back on" : "";
         }
 
         // Back to the first-run default: the stored value is removed, so Get answers the default again.

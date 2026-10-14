@@ -30,9 +30,7 @@ namespace Grobyq
         public bool Warmup = false;
         public bool DoBackground = true;
         public bool BgAffinity = true;
-        public bool BgForeground = true;
         public bool DoAffRules = true;
-        public bool DoProcess = true;           // game process: class / I/O / memory priority / EcoQoS / boost
         public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
         public bool Game = true;                // the game threads optimizer is on: targets, affinity rules, the user's background list
         public bool Sys = false;                // the system threads optimizer is on: the built-in profile + its background list
@@ -135,7 +133,7 @@ namespace Grobyq
         // Built-in system profile (embedded, see ThreadIni.LoadBundled). Applied by the "System thread optimization"
         // switch, never written to presets.json and not listed in the preset picker. Priority only.
         public Dictionary<string, Preset> SystemPresets = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);
-        // ...and its background lists ([PROCESSESTOSUSPEND] / [SETPROCESSESTOIDLEPRIORITY] -> Idle while the game has focus).
+        // ...and its background lists ([PROCESSESTOSUSPEND] / [SETPROCESSESTOIDLEPRIORITY] -> Idle while the game runs).
         public Dictionary<string, string> SystemBg = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public void LoadSystemProfile(bool on)
@@ -157,7 +155,7 @@ namespace Grobyq
             public uint Prio; public ulong Aff; public bool Have; public bool BoostDisabled; public uint Io = 2; public uint Mem = 5;
             public bool EcoKnown; public uint EcoCtl, EcoState;   // EcoQoS before grobyq (when Windows can report it)
             public bool Class, IoSet, MemSet, AffSet, SetsSet, Eco, Boost;
-            public bool BgClass, BgIo, BgMem, BgAff;       // set by the background layer only (released on alt-tab)
+            public bool BgClass, BgIo, BgMem, BgAff;       // set by the background layer only (released when the game exits or the layer goes off)
             public string LastSets = "";                  // the CPU sets written this session (written again only when they change)
         }
         // Thread baseline + what grobyq changed on it (an Ideal-CPU-only thread keeps its priority on revert).
@@ -373,17 +371,12 @@ namespace Grobyq
             _pidCache = d;
         }
 
-        // ---- starvation guard (opt-in, OFF by default) ----
-        // Off: the system profile runs as written - its -15 / 200 / 300 rules put DWM, service and Steam threads at Idle,
-        // the core of the gaming profile; the clean game mode closes the busy apps that could compete with them.
-        // On: the processes a game waits on - Windows' protected ones (DWM, csrss, services...) and Steam (the game's Steam
-        // API calls are IPC round trips to steam.exe) - never go below "Below normal". Why it exists: a thread at Idle
-        // (priority 1) loses every contest to a busy background app (an Idle-class browser runs at 4-6) and gets the CPU
-        // only when Windows' starvation boost lifts it after ~4 s - a game waiting on it can freeze for seconds.
+        // ---- game companions ----
+        // Steam and its helpers: the game's Steam API calls are IPC round trips to steam.exe, so the game mode never closes
+        // them. Their priorities follow the profile as written (its -15 / 200 / 300 rules = Idle) - that is the gaming
+        // profile; the clean game mode closes the busy apps that could otherwise compete with Idle threads.
         public static readonly HashSet<string> Companions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "steam", "steamservice", "steamwebhelper", "gameoverlayui" };
-        public static bool StarveGuard { get { return Settings.GetBool("StarveGuard"); } }
-        public static bool Guarded(string exe) { return StarveGuard && (IsProtected(exe) || Companions.Contains(BareName(exe))); }
 
         // ---- game mode: close / reopen background apps (opt-in, Settings "CloseBackground") ----
         // When the game appears, the apps the user marked "Close" are ASKED to close (WM_CLOSE via CloseMainWindow - the app
@@ -648,14 +641,14 @@ namespace Grobyq
                     _gamePids.Add(p.Id);
 
                     var pb = _procBefore[p.Id];
-                    // v4 manual mode: only the parts the user switched on are written (and only those get restored).
-                    //   DoProcess = class / I/O / memory priority / EcoQoS off / process boost (preset)
-                    //   DoMask    = process affinity + default CPU sets (the game core mask)
+                    // What is written (and only that is restored):
+                    //   the preset's process part, always - class / I/O / memory priority / EcoQoS / process boost. Its
+                    //     defaults equal Windows' (Normal / Normal / Normal), so out of the box only EcoQoS goes off.
+                    //   DoMask = process affinity + default CPU sets (the game core mask), when switched on (Affinity).
                     // Every value is read back first and written only when it differs: a catch-up pass over a running game
                     // changes nothing that is already right (no re-set affinity / CPU sets = no thread migrations).
                     bool okPrio = true, okMem = true, okEco = true, okAff = true, okSets = true, changed = false;
                     int stIo = 0;
-                    if (o.DoProcess)
                     {
                         pb.Class = pb.IoSet = pb.MemSet = true;
                         if (Native.GetPriorityClass(hp) != PRIO[cls]) { okPrio = Native.SetPriorityClass(hp, PRIO[cls]); changed = true; }
@@ -696,7 +689,7 @@ namespace Grobyq
                     {
                         string rbName; PRIONAME.TryGetValue((int)rbClass, out rbName);
                         log.Add(string.Format("[OK] {0} PID {1} L{2} class={3} (read-back {4}) io={5} mem={6} mask=0x{7:X} LP {8}{9}",
-                            target, p.Id, lvl, o.DoProcess ? cls : "keep", rbName ?? "?", o.DoProcess ? io : "keep", o.DoProcess ? mem : "keep",
+                            target, p.Id, lvl, cls, rbName ?? "?", io, mem,
                             eff, Masks.MaskLps(eff), o.DoMask ? "" : " (mask not set)"));
                     }
                     if (!okPrio) { log.Add("     ! SetPriorityClass failed"); report.Failures.Add("SetPriorityClass"); }
@@ -974,15 +967,7 @@ namespace Grobyq
                         uint clsV;
                         if (!PRIO.TryGetValue(clsB, out clsV) || string.Equals(clsB, "Realtime", StringComparison.OrdinalIgnoreCase) || string.Equals(clsB, "High", StringComparison.OrdinalIgnoreCase))
                         { clsB = "BelowNormal"; clsV = PRIO[clsB]; }
-                        // starvation guard: a process the game waits on (Steam) steps aside only to Below normal, with normal
-                        // I/O and memory priority - never under the background apps, never paged out first
-                        bool guarded = Guarded(b);
-                        if (guarded && string.Equals(clsB, "Idle", StringComparison.OrdinalIgnoreCase))
-                        {
-                            clsB = "BelowNormal"; clsV = PRIO[clsB];
-                            AdviceOnce(log, "guardbg:" + bn, string.Format("[BG] {0}: Below normal instead of Idle (starvation guard: the game waits on it)", bn));
-                        }
-                        uint ioV = guarded ? IOP["Normal"] : IOP["VeryLow"], memV = guarded ? MEM["Normal"] : MEM["Low"];
+                        uint ioV = IOP["VeryLow"], memV = MEM["Low"];
                         bool bgChanged = false;
                         if (Native.GetPriorityClass(hp) != clsV) { Native.SetPriorityClass(hp, clsV); bgChanged = true; }
                         if (Native.GetProcIo(hp) != ioV) { Native.SetProcIo(hp, ioV); bgChanged = true; }
@@ -1002,7 +987,7 @@ namespace Grobyq
                         }
                         else if (ruled) mtxt = "mask = its affinity rule";
                         _appliedBg.Add(bp.Id); n++;
-                        if (bgChanged) log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io {3} / {4}", bp.Name, bp.Id, clsB, guarded ? "Normal" : "VeryLow", mtxt));
+                        if (bgChanged) log.Add(string.Format("[BG] {0,-22} PID {1,-6} {2} / io VeryLow / {3}", bp.Name, bp.Id, clsB, mtxt));
                     }
                     finally { Native.CloseHandle(hp); }
                 }
@@ -1032,19 +1017,6 @@ namespace Grobyq
             _appliedBg.Clear(); LastBg = 0; BgOn = false;
             log.Add(string.Format("[BG] released {0} background processes (no game running, or the background layer is off)", n));
             return log;
-        }
-
-        public bool GameForeground()
-        {
-            uint fg = Native.ForegroundPid();
-            if (fg == 0) return false;
-            try
-            {
-                var p = Process.GetProcessById((int)fg);
-                string nm = (p.ProcessName + ".exe").ToLowerInvariant();
-                return Targets.Any(t => t.ToLowerInvariant() == nm);
-            }
-            catch { return false; }
         }
 
         // Disposes the Process[] it enumerates (GetProcessesByName leaks a handle per object otherwise).
@@ -1090,8 +1062,7 @@ namespace Grobyq
             }
 
             // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer).
-            // ApplyAll runs only inside a game session (Optimizer), which already encodes the session rule (the game runs, or
-            // in foreground mode runs and is in front).
+            // ApplyAll runs only inside a game session (Optimizer): a chosen game is running.
             bool userBg = o.Game && o.DoBackground, sysBg = o.Sys && SystemBg.Count > 0;
             if (userBg || sysBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
             else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
@@ -1370,7 +1341,6 @@ namespace Grobyq
         {
             setCount = 0;
             bool prot = IsProtected(preset.Exe);
-            bool guarded = Guarded(preset.Exe);
             var log = new List<string>();
             var snap = Snapshot(pid);
             if (!snap.Ok || snap.Rows.Count == 0) return log;
@@ -1394,11 +1364,6 @@ namespace Grobyq
                         int tp; bool did = false;
                         if (ThreadPrio(rule.Prio, adv, out tp))
                         {
-                            if (guarded && tp < TPRIO["BelowNormal"])
-                            {
-                                tp = TPRIO["BelowNormal"];
-                                AdviceOnce(log, "guardthr:" + preset.Exe, string.Format("[TH] {0}: Idle / Lowest rules run as Below normal (starvation guard: the game waits on this process)", preset.Exe));
-                            }
                             MarkPrio(tb, ht);
                             if (Native.GetThreadPriority(ht) != tp) { Native.SetThreadPriority(ht, tp); did = true; }
                         }

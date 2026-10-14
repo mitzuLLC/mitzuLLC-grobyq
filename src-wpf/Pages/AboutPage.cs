@@ -58,7 +58,7 @@ namespace Grobyq.Pages
             t.Margin = new Thickness(0, 6, 0, 0);
             hero.Children.Add(t);
 
-            var v = Ui.Text(L.F("version {0}", Brand.Version) + "  ·  " + L.T("Core-aware latency tuning"), 10.5, "Dim", false);
+            var v = Ui.Text(L.F("version {0}", Brand.VersionText) + "  ·  " + L.T("Core-aware latency tuning"), 10.5, "Dim", false);
             v.HorizontalAlignment = HorizontalAlignment.Center;
             v.Margin = new Thickness(0, 2, 0, 0);
             hero.Children.Add(v);

@@ -98,7 +98,7 @@ namespace Grobyq
         // ------------------------------------------------------------------ log seed (English on purpose: A/B evidence)
         private void SeedLog()
         {
-            AppLog.Add(Brand.Name + " " + Brand.Version + " " + Brand.Credit + "  -  " + Brand.XUrl);
+            AppLog.Add(Brand.Name + " " + Brand.VersionText + " " + Brand.Credit + "  -  " + Brand.XUrl);
             AppLog.Add("THREADS optimizes the game. AFFINITY pins cores and interrupts.");
             if (Settings.MigrationNote.Length > 0) AppLog.Add("[i] " + Settings.MigrationNote);
             try

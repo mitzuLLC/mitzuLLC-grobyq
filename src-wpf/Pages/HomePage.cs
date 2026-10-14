@@ -68,7 +68,7 @@ namespace Grobyq.Pages
             var hero = new StackPanel { Margin = new Thickness(0, 8, 0, 0), Height = 94 };
             var line = new StackPanel { Orientation = Orientation.Horizontal };
             var t = Ui.Bold(Brand.Name, 26, "Fg");
-            var tag = Ui.Semi("v" + Brand.Version, 10, "Acc");
+            var tag = Ui.Semi("v" + Brand.VersionText, 10, "Acc");
             tag.VerticalAlignment = VerticalAlignment.Bottom;
             tag.Margin = new Thickness(8, 0, 0, 9);
             line.Children.Add(t);
