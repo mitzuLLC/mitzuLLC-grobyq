@@ -8,13 +8,13 @@ using System.Windows.Media;
 
 namespace Grobyq.Pages
 {
-    // Threads > Background processes: the list as chips (program, the class it gets while the game is in front - click
-    // to change - and remove), plus Add (a running program or an .exe). Part of the page draft: Save writes the list
-    // (Settings "BgProcs") and the classes (presets.json "background"), Cancel drops the edits. The bottom of the page
-    // also has the thread-settings reset.
+    // Threads > Background processes: the list as chips (program, what it gets while the game runs - a lower class, or
+    // Close for the game mode; click to change - and remove), plus Add (a running program or an .exe). Part of the page
+    // draft: Save writes the list (Settings "BgProcs") and the classes (presets.json "background"), Cancel drops the edits.
+    // The bottom of the page also has the thread-settings reset.
     public sealed partial class ThreadsPage
     {
-        private static readonly string[] BgClassOrder = { "BelowNormal", "Idle", "Normal" };
+        private static readonly string[] BgClassOrder = { "BelowNormal", "Idle", "Normal", "Close" };
 
         private WrapPanel _bgPanel;
         private Button _bgAdd;
@@ -23,7 +23,7 @@ namespace Grobyq.Pages
 
         private void BuildBackgroundList(CardBox bg)
         {
-            var desc = bg.Add(Ui.Text(L.T("While the game is in front, these get the class on the chip (click it to change), VeryLow I/O and Low memory priority. System processes (dwm, audiodg, csrss, explorer, svchost...) are protected and never touched."), 8.75, "Dim"));
+            var desc = bg.Add(Ui.Text(L.T("Each program gets what its chip says (click to change): a lower priority class with VeryLow I/O and Low memory while the game runs, or Close - closed when the game launches and reopened when it exits (only when the switch above is on). System processes (dwm, audiodg, csrss, explorer, svchost...) are protected and never touched."), 8.75, "Dim"));
             desc.Margin = new Thickness(0, 10, 0, 8);
             _bgPanel = bg.Add(new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(-4, 0, 0, 10) });
             _bgAdd = Ui.Btn("+  " + L.T("Add"), "BtnOutline");
@@ -33,13 +33,15 @@ namespace Grobyq.Pages
 
         private static string BgClassText(string c)
         {
-            return c == "Idle" ? L.T("Idle") : c == "Normal" ? L.T("Normal") : L.T("Below normal");
+            return c == "Idle" ? L.T("Idle") : c == "Normal" ? L.T("Normal") : c == "Close" ? L.T("Close") : L.T("Below normal");
         }
 
         private string BgClassOf(string exe)
         {
             string c;
-            return _bgCls.TryGetValue(exe, out c) && BgClassOrder.Contains(c) ? c : "BelowNormal";
+            if (!_bgCls.TryGetValue(exe, out c) || !BgClassOrder.Contains(c)) return "BelowNormal";
+            if (c == "Close" && Engine.Companions.Contains(Engine.BareName(exe))) return "BelowNormal";   // what the engine does with it
+            return c;
         }
 
         private void FillBg()
@@ -60,13 +62,13 @@ namespace Grobyq.Pages
 
             // the class pill: click = next class (Below normal -> Idle -> Normal)
             string cls = BgClassOf(exe);
-            var ct = Ui.Text(BgClassText(cls), 8.25, cls == "Idle" ? "Faint" : cls == "Normal" ? "Fg" : "Dim", false);
+            var ct = Ui.Text(BgClassText(cls), 8.25, cls == "Idle" ? "Faint" : cls == "Normal" ? "Fg" : cls == "Close" ? "Warn" : "Dim", false);
             ct.VerticalAlignment = VerticalAlignment.Center;
             var pill = new Border
             {
                 Height = 20, Padding = new Thickness(8, 0, 8, 0), Margin = new Thickness(8, 0, 0, 0), CornerRadius = new CornerRadius(10),
                 Background = Ui.B("Hot"), BorderBrush = Ui.B("Edge"), BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
-                Child = ct, ToolTip = L.T("Class while the game is in front - click to change")
+                Child = ct, ToolTip = L.T("What happens to it while the game runs - click to change")
             };
             pill.MouseEnter += (s, e) => pill.BorderBrush = Ui.B("EdgeDn");
             pill.MouseLeave += (s, e) => pill.BorderBrush = Ui.B("Edge");
@@ -98,6 +100,8 @@ namespace Grobyq.Pages
         {
             int i = Array.IndexOf(BgClassOrder, BgClassOf(exe));
             string next = BgClassOrder[(i + 1) % BgClassOrder.Length];
+            // Steam and its helpers are never "Close": the game's Steam API calls need them running
+            if (next == "Close" && Engine.Companions.Contains(Engine.BareName(exe))) next = BgClassOrder[(i + 2) % BgClassOrder.Length];
             if (next == "BelowNormal") _bgCls.Remove(exe); else _bgCls[exe] = next;
             BgChanged();
         }
@@ -177,8 +181,8 @@ namespace Grobyq.Pages
             if (!Dlg.Ask(Window.GetWindow(this), L.T("Reset the thread settings? Both optimizers turn off and every change goes back to its Windows default; the games, parts, game presets and the background list return to the first-run defaults. Affinity and the app settings stay."), true)) return;
             var o = Optimizer.Instance;
             if (o != null) o.StopAll();
-            Settings.Reset("WatchList", "GameLabels", "DoProcess", "DoThreads", "SkipCpu0", "PeriodicReapply", "Period", "TopN",
-                           "DoBackground", "BgAffinity", "BgForeground", "BgProcs", "ApplyAllPresets", "AllowProtectedPriority",
+            Settings.Reset("WatchList", "GameLabels", "DoProcess", "DoThreads", "PeriodicReapply", "Period", "TopN",
+                           "DoBackground", "CloseBackground", "BgAffinity", "BgForeground", "BgProcs", "ApplyAllPresets", "AllowProtectedPriority",
                            "AdvancedThreadMode", "GameOpt", "SystemThreadOpt", "AutoEnable", "StarveGuard");
             if (o != null)
             {

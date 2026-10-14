@@ -19,7 +19,7 @@ namespace Grobyq.Pages
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
 
-        private readonly CheckBox _gameSw, _sysSw, _frontSw, _guardSw;
+        private readonly CheckBox _gameSw, _sysSw, _frontSw, _guardSw, _closeSw;
         private readonly Ellipse _gameDot, _sysDot;
         private readonly TextBlock _gameStat, _sysStat;
         private readonly Dictionary<string, BoxCheck> _known = new Dictionary<string, BoxCheck>(StringComparer.OrdinalIgnoreCase);
@@ -43,7 +43,7 @@ namespace Grobyq.Pages
             _gameSw = Ui.Switch(false);
             _gameSw.Click += (s, e) => { OptUi.Game(_gameSw.IsChecked == true); UpdateState(); };
             top.Add(OptimizerRow(L.T("Game threads optimizer"),
-                L.T("While a game below is in front, applies what is switched on below and saved. Minimized or closed - everything goes back."),
+                L.T("When a game below starts, applies what is switched on below and saved. The game closes - everything goes back."),
                 _gameSw, out _gameDot, out _gameStat, true));
             _sysSw = Ui.Switch(false);
             _sysSw.Click += (s, e) =>
@@ -52,7 +52,7 @@ namespace Grobyq.Pages
                 UpdateState();
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
-                L.T("grobyq's built-in profile while the game is in front: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
+                L.T("grobyq's built-in profile while a game runs: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
                 _sysSw, out _sysDot, out _sysStat, true));
             // WHEN both apply: acts at once, like the switches above
             _frontSw = Ui.Switch(Settings.GetBool("BgForeground"));
@@ -64,7 +64,7 @@ namespace Grobyq.Pages
                 var o = Optimizer.Instance; if (o != null) o.Refresh();
                 UpdateState();
             };
-            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Recommended on. The game is minimized or you alt-tab - everything grobyq changed goes back to normal; back in the game - applied again. Off = kept while the game runs."), _frontSw));
+            top.Add(Ui.Row(L.T("Only while the game is in front"), L.T("Off (default): applied once when the game starts and kept until it closes - alt-tab costs nothing, nothing is re-applied when you come back. On: minimize or alt-tab puts everything back to normal; back in the game - applied again."), _frontSw));
             _guardSw = Ui.Switch(Settings.GetBool("StarveGuard"));
             _guardSw.Click += (s, e) =>
             {
@@ -96,10 +96,9 @@ namespace Grobyq.Pages
             // ---- what the game optimizer changes (each part off until you switch it on and Save) ----
             Title(L.T("Game optimizer"));
             var card = Card();
-            card.Add(SwitchRow(L.T("Game process priority"), L.T("The game gets its preset class (High, never Realtime), normal I/O and memory priority and EcoQoS off while it runs."), "DoProcess"));
+            card.Add(SwitchRow(L.T("Game process priority"), L.T("The game gets its preset class (Normal by default - raise it in the game preset; never Realtime), normal I/O and memory priority and EcoQoS off while it runs."), "DoProcess"));
             card.Add(SwitchRow(L.T("Optimize threads"), L.T("A scheduler hint for the game: Ideal CPU plus a priority on its busiest threads (named rules and hot threads). Off = no thread of the game is touched."), "DoThreads"));
-            card.Add(SwitchRow(L.T("Avoid CPU 0 for hot threads"), L.T("On 6+ core CPUs no hot thread gets CPU 0 as its Ideal CPU (interrupt-heavy by default)."), "SkipCpu0"));
-            card.Add(SwitchRow(L.T("Catch new threads"), L.T("While the game is in front: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again."), "PeriodicReapply"));
+            card.Add(SwitchRow(L.T("Catch new threads"), L.T("While the game runs: every 2 s new threads of the game and of the profile's processes get their settings. What is already set is read, never written again."), "PeriodicReapply"));
             var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
             toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
             card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff, false));
@@ -112,6 +111,17 @@ namespace Grobyq.Pages
             var bg = Card();
             bg.Add(SwitchRow(L.T("Lower background processes"), L.T("The processes in the list below get a lower class, VeryLow I/O and Low memory priority while the game runs."), "DoBackground"));
             bg.Add(SwitchRow(L.T("Pin background off the game cores"), L.T("Background processes get the cores the game mask leaves free (E-cores, SMT siblings, the other CCD). Helps most on multi-CCD CPUs or with heavy background; neutral otherwise - measure."), "BgAffinity"));
+            // game mode: an immediate switch (acts at once, like the ones at the top), not a draft - closing / reopening is a
+            // runtime action, fully reversible. Only the chips marked "Close" below are affected.
+            _closeSw = Ui.Switch(Settings.GetBool("CloseBackground"));
+            _closeSw.Click += (s, e) =>
+            {
+                bool on = _closeSw.IsChecked == true;
+                Settings.SetBool("CloseBackground", on);
+                AppLog.Add("[UI] close background on game launch = " + (on ? "on" : "off"));
+                var o = Optimizer.Instance; if (o != null) o.CloseModeChanged();
+            };
+            bg.Add(Ui.Row(L.T("Close background on game launch"), L.T("Acts at once. When a game from the list starts, the programs you mark 'Close' below are asked to close (grobyq never force-kills), then reopened when the game exits. Mark only apps safe to close - unsaved work in them may be lost; an app set to minimize to tray will go to its tray."), _closeSw));
             BuildBackgroundList(bg);                         // chips + Add (ThreadsPage.Background.cs)
 
             // ---- reset: this page only (the whole app resets in Settings) ----
@@ -364,6 +374,7 @@ namespace Grobyq.Pages
                 foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
                 if (_frontSw != null) _frontSw.IsChecked = Settings.GetBool("BgForeground");
                 if (_guardSw != null) _guardSw.IsChecked = Settings.GetBool("StarveGuard");
+                if (_closeSw != null) _closeSw.IsChecked = Settings.GetBool("CloseBackground");
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
                 _labels.Clear();
@@ -398,7 +409,7 @@ namespace Grobyq.Pages
             }
 
             if (!sys) Stat(_sysDot, _sysStat, "Faint", L.T("off - system processes are not touched"));
-            else if (!session) Stat(_sysDot, _sysStat, "Warn", L.T("waiting for a game in front - nothing is changed now"));
+            else if (!session) Stat(_sysDot, _sysStat, "Warn", string.IsNullOrEmpty(live) ? L.T("waiting for a game - nothing is changed now") : L.F("{0} is minimized - normal mode", live));
             else
             {
                 string t = L.F("threads: {0}   ·   processes: {1}", o.Eng.SysThreadCount, o.Eng.SysProcCount);

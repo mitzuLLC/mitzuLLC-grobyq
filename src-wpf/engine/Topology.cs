@@ -503,11 +503,14 @@ namespace Grobyq
 
         // Which mask is a sane STARTING point for this CPU (spec F1 recommender). First-run default only:
         // Settings.PinMaskDefault keeps an existing install on the value it was already running.
-        // Dual-CCD X3D with a verified split (family A) -> the game set; everything else as before.
+        // Dual-CCD X3D with a verified split (family A) -> the game set; everything else -> all cores (v4.0).
+        // No blanket "no CPU 0" any more: CPU 0 is not special by itself - the LPs that actually carry a dedicated device
+        // interrupt pin are, and the interrupt layer (GameMask, Affinity > Cores > Interrupt cores) already takes exactly
+        // those off the game, from the registry, not from folklore. NoCpu0 / SmtOffNoCpu0 stay as opt-in A/B steps.
         public static string Recommended(Topo t)
         {
             if (t.Split.Family == "A" && t.Split.CanSplit) return "GameSet";
-            return RecommendedLegacy(t);
+            return "AllCores";
         }
 
         // The v2.0 - v3.0 recommender, X3D-agnostic.

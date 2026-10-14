@@ -383,14 +383,15 @@ namespace Grobyq.Pages
             }
             else if (t.PhysicalCount >= 8)
             {
+                // baseline first (v4.0): CPU 0 stays with the game; taking it away is an A/B step, not the default
+                add("AllCores", L.T("Baseline: compare every step with this."));
                 add("NoCpu0", L.T("Leaves the first core to interrupts and Windows; the game keeps 14+ logical processors."));
                 add("SmtOffNoCpu0", L.T("Also one thread per core: most isolation. Only if it measurably helps on your PC."));
-                add("AllCores", L.T("Baseline: compare every step with this."));
             }
             else if (t.PhysicalCount >= 6)
             {
-                add("NoCpu0", L.T("6-7 cores: leave the first core to interrupts and Windows, keep SMT for the game's worker threads."));
                 add("AllCores", L.T("Baseline. With 6 cores the difference is small; keep whichever measures better."));
+                add("NoCpu0", L.T("6-7 cores: leave the first core to interrupts and Windows, keep SMT for the game's worker threads."));
             }
             else add("AllCores", L.T("4 cores or fewer: every narrower mask takes more than it gives. Keep all cores."));
             return list;

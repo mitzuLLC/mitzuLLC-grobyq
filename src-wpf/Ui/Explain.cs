@@ -121,9 +121,9 @@ namespace Grobyq
         {
             switch (c)
             {
-                case "High": return L.T("Base priority 13. Wins over Normal (8) programs on the same core. Default for the game. Never Realtime (24) - it can starve the input and audio stack.");
+                case "High": return L.T("Base priority 13. Wins over Normal (8) programs on the same core - including the ones the game itself waits on (DWM, Steam). Raise it only if a trace shows the game losing the CPU. Never Realtime (24) - it can starve the input and audio stack.");
                 case "AboveNormal": return L.T("Base priority 10. A softer step above normal programs.");
-                case "Normal": return L.T("Base priority 8. Windows default.");
+                case "Normal": return L.T("Base priority 8. Windows default, and grobyq's default for the game.");
                 case "BelowNormal": return L.T("Base priority 6. For background tools.");
                 case "Idle": return L.T("Base priority 4. Runs only when nothing else wants the core.");
             }

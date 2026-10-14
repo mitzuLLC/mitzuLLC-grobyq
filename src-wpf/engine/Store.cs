@@ -25,7 +25,7 @@ namespace Grobyq
     public sealed class Preset
     {
         public string Exe = "";
-        public string Class = "High";      // Idle BelowNormal Normal AboveNormal High   (never Realtime)
+        public string Class = "Normal";    // Idle BelowNormal Normal AboveNormal High   (never Realtime). Normal = Windows default: the game process priority is a lever you raise yourself.
         public string Io = "Normal";       // VeryLow Low Normal High
         public string Mem = "Normal";      // VeryLow Low Medium BelowNormal Normal
         public string Eco = "Off";         // Off = EcoQoS off (HighQoS) | Keep = leave Windows default
@@ -59,7 +59,10 @@ namespace Grobyq
             // video decoder step aside. Anti-cheat-free by construction (Engine.ANTICHEAT is refused on every path anyway).
             foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
             {
-                var s2 = new Preset { Exe = exe, Class = "High", Io = "Normal", Mem = "Normal" };
+                // Class = Normal by default: the game keeps the Windows priority. Raising the whole process to High can
+                // starve the very threads it waits on (DWM, Steam IPC); the win comes from the thread rules and the
+                // background layer, not from a blanket class bump. Raise it per game in the preset if a title needs it.
+                var s2 = new Preset { Exe = exe, Class = "Normal", Io = "Normal", Mem = "Normal" };
                 s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Ideal = "auto", Prio = "AboveNormal" });
                 s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Ideal = "auto" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "embree3.dll", Prio = "Lowest" });
@@ -118,6 +121,25 @@ namespace Grobyq
             return log;
         }
 
+        // One-time update (v4.0): the default game process priority drops from High to Normal (Windows default). An install
+        // whose cs2 / dota2 preset is still at the old High default is moved to Normal, so the game process is no longer
+        // blanket-boosted over the threads it waits on. A preset deliberately set to another class is left alone. Runs once.
+        public static List<string> MigrateNormalClass(Engine eng)
+        {
+            var log = new List<string>();
+            if (Settings.Get("MigratedNormalClass") == "1") return log;
+            bool any = false;
+            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
+            {
+                Preset p;
+                if (eng.Presets.TryGetValue(exe, out p) && p != null && string.Equals(p.Class, "High", StringComparison.OrdinalIgnoreCase))
+                { p.Class = "Normal"; any = true; log.Add("[i] " + exe + ": process priority class High -> Normal (v4.0 default; raise it in the preset if you want it)"); }
+            }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
+            Settings.Set("MigratedNormalClass", "1");
+            return log;
+        }
+
         // ---------------- load / save ----------------
         public static void Load(out Dictionary<string, Preset> presets, out Dictionary<string, string> bg)
         {
@@ -168,7 +190,6 @@ namespace Grobyq
                 { "maskCpu", SafeSig() },
                 { "topN", Settings.GetInt("TopN", 4) },
                 { "period", Settings.GetInt("Period", 2000) },
-                { "skipCpu0", Settings.GetBool("SkipCpu0") },
                 { "backgroundList", string.Join(" ", Settings.BgProcs()) },
                 { "affinity", eng.AffRules.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(k => k.Key, k => (object)k.Value) },
                 { "background", eng.BgClasses.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(k => k.Key, k => (object)k.Value) },
@@ -181,7 +202,9 @@ namespace Grobyq
 
         // Switches a profile carries. The two gated ones (protected priority, TimeCritical) are never switched on by a
         // load: they come back in LastImportWants and the page asks the user (per-session acknowledgment).
-        public static readonly string[] FlagKeys = { "DoThreads", "SkipCpu0", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt", "DoBackground",
+        // "CloseBackground" (game mode) is deliberately NOT here: closing apps can lose unsaved work, so it stays a local,
+        // per-PC opt-in. A profile may carry "Close" marks on background chips; they stay inert until this PC's switch is on.
+        public static readonly string[] FlagKeys = { "DoThreads", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt", "DoBackground",
                                                      "BgAffinity", "BgForeground", "PeriodicReapply", "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly HashSet<string> GatedFlags = new HashSet<string> { "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly List<string> LastImportWants = new List<string>();
@@ -321,7 +344,6 @@ namespace Grobyq
             if (root.ContainsKey("maskIrq")) GameMask.SetMode(S(root, "maskIrq"));
             if (root.ContainsKey("topN")) Settings.Set("TopN", S(root, "topN"));
             int per; if (root.ContainsKey("period") && int.TryParse(S(root, "period"), NumberStyles.Integer, CultureInfo.InvariantCulture, out per) && per >= 1000 && per <= 60000) Settings.Set("Period", per.ToString(CultureInfo.InvariantCulture));
-            if (root.ContainsKey("skipCpu0")) { string sc = S(root, "skipCpu0").Trim().ToLowerInvariant(); Settings.SetBool("SkipCpu0", sc == "true" || sc == "1"); }
             if (root.ContainsKey("backgroundList"))
                 Settings.Set("BgProcs", string.Join(" ", S(root, "backgroundList").Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries)
                                                        .Select(ExeName).Where(x => x.Length > 0 && Engine.Gate(x, Engine.Op.Process, false) == null)));
@@ -374,7 +396,7 @@ namespace Grobyq
                 if (m == null) continue;
                 var p = new Preset
                 {
-                    Exe = S(m, "exe"), Class = S(m, "class", "High"), Io = S(m, "io", "Normal"), Mem = S(m, "mem", "Normal"),
+                    Exe = S(m, "exe"), Class = S(m, "class", "Normal"), Io = S(m, "io", "Normal"), Mem = S(m, "mem", "Normal"),
                     Eco = S(m, "eco", "Off"), Boost = S(m, "boost", "Keep"), HotFirst = S(m, "hotFirst", "AboveNormal"), HotOthers = S(m, "hotOthers", ""),
                 };
                 p.Enabled = S(m, "on", "true").ToLowerInvariant() != "false";

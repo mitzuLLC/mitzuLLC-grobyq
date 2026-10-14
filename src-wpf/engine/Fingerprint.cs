@@ -53,7 +53,7 @@ namespace Grobyq
                     ulong bg = Masks.BgMask(t, m.Mask);
                     A("  background would get", string.Format("0x{0:X}  LP {1}", bg, Masks.MaskLps(bg)));
                 }
-                A("Ideal Processor pool", string.Join(",", Masks.IdealCandidates(t, true, 0).Select(s => (int)s.LP)));
+                A("Ideal Processor pool", string.Join(",", Masks.IdealCandidates(t, false, 0).Select(s => (int)s.LP)));   // the pool hot threads really use (CPU 0 included)
             }
             catch (Exception ex) { A("topology", ex.Message); }
 

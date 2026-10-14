@@ -12,7 +12,6 @@ namespace Grobyq
         public string Key = "", Name = "", Summary = "", Irq = "";
         public string Mask = "";            // stored in Settings "Mask" when the template is applied
         public ulong Game, Background;      // resolved on this CPU
-        public bool SkipCpu0 = true;        // hot threads avoid LP 0 as their Ideal CPU
         public bool Available;
         public string Why = "";             // why it is not available here (English format; the UI translates)
         public string WhyArg;               // {0} of Why, when it has one
@@ -40,7 +39,7 @@ namespace Grobyq
             //    everything else. On a hybrid CPU the same rule on the P-cores; E-cores stay background.
             var smt = new LayoutTemplate
             {
-                Key = "smt-isolation", Name = "SMT isolation", Mask = "SmtOffNoCpu0", SkipCpu0 = false,
+                Key = "smt-isolation", Name = "SMT isolation", Mask = "SmtOffNoCpu0",
                 Summary = t.Hybrid ? "Game on one thread of every P-core except core 0; the SMT siblings, core 0 and the E-cores take background work."
                                    : "Game on one thread of every physical core except core 0; the SMT siblings and core 0 take background work.",
                 Irq = "GPU interrupts on core 0 (LP 0 / 1), mouse / NIC on a free SMT sibling. LP 0 already carries kernel DPC load: co-locating the GPU there can help or contend - decide by WPA, not by preset.",

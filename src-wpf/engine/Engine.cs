@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 
@@ -25,7 +26,6 @@ namespace Grobyq
         public string MaskName = "AllCores";
         public string BgMaskName;               // the rule background pinning is derived from (null = MaskName): base + edits, no interrupt drops
         public int TopN = 4;
-        public bool SkipCpu0 = true;
         public bool DoThreads = true;
         public bool Warmup = false;
         public bool DoBackground = true;
@@ -384,6 +384,79 @@ namespace Grobyq
         public static bool StarveGuard { get { return Settings.GetBool("StarveGuard"); } }
         public static bool Guarded(string exe) { return StarveGuard && (IsProtected(exe) || Companions.Contains(BareName(exe))); }
 
+        // ---- game mode: close / reopen background apps (opt-in, Settings "CloseBackground") ----
+        // When the game appears, the apps the user marked "Close" are ASKED to close (WM_CLOSE via CloseMainWindow - the app
+        // decides and may prompt to save or drop to its own tray; grobyq NEVER suspends or kills a process). Their exe path
+        // is remembered, and exactly those are reopened when the game exits - de-elevated through the shell, so Chrome /
+        // Discord come back as normal apps, not as admin. Only non-protected, non-anti-cheat user apps reach this path: the
+        // gate and the background list both refuse the rest, so explorer / dwm / csrss can never be marked "Close".
+        private readonly Dictionary<string, string> _closed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // bare name -> exe path to reopen
+        public bool HasClosed { get { return _closed.Count > 0; } }   // status read (UI thread), like HasChanges; _closed is mutated only under the lock
+
+        // A background entry set to "Close" (the chip's 4th state): the lowering layer skips it, this path owns it.
+        private bool IsClose(string exe)
+        {
+            if (Companions.Contains(BareName(exe))) return false;          // the game needs Steam / its overlay running: never closed
+            string c;
+            if (BgClasses != null && (BgClasses.TryGetValue(exe, out c) || BgClasses.TryGetValue(Base(exe) + ".exe", out c)))
+                return string.Equals(c, "Close", StringComparison.OrdinalIgnoreCase);
+            return false;
+        }
+
+        public List<string> CloseForGame() { lock (_gate) return CloseForGameCore(); }
+        private List<string> CloseForGameCore()
+        {
+            var log = new List<string>();
+            var targets = new HashSet<string>(Targets ?? new string[0], StringComparer.OrdinalIgnoreCase);
+            foreach (var b in Settings.BgProcs())
+            {
+                if (!IsClose(b)) continue;
+                if (targets.Contains(b) || targets.Contains(Base(b) + ".exe")) continue;   // never a game
+                if (Gate(b, Op.Process, false) != null) continue;                          // defence in depth: never protected / anti-cheat
+                foreach (var p in ByName(b))
+                {
+                    try
+                    {
+                        if (p.MainWindowHandle == IntPtr.Zero) continue;                   // no window to ask - never force a windowless process
+                        string path = ""; try { if (p.MainModule != null) path = p.MainModule.FileName; } catch { }
+                        if (path.Length > 0) _closed[Base(b)] = path;
+                        bool asked = false; try { asked = p.CloseMainWindow(); } catch { }
+                        log.Add(string.Format("[GM] {0}: close requested{1}", p.ProcessName, asked ? "" : " (the app did not take it)"));
+                    }
+                    catch { }
+                    finally { try { p.Dispose(); } catch { } }
+                }
+            }
+            if (log.Count > 0) log.Add("[GM] game mode on: these reopen when the game closes. grobyq never force-kills - an app set to minimize to tray goes to its tray.");
+            return log;
+        }
+
+        public List<string> RelaunchClosed() { lock (_gate) return RelaunchClosedCore(); }
+        private List<string> RelaunchClosedCore()
+        {
+            var log = new List<string>();
+            foreach (var kv in _closed.ToList())
+            {
+                _closed.Remove(kv.Key);
+                string path = kv.Value;
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+                var running = ByName(kv.Key); int n = running.Length; foreach (var p in running) { try { p.Dispose(); } catch { } }
+                if (n > 0) continue;                                                        // already reopened by the user
+                try { ShellOpen(path); log.Add("[GM] reopened " + Path.GetFileName(path)); }
+                catch (Exception ex) { log.Add("[!!] could not reopen " + Path.GetFileName(path) + ": " + ex.Message); }
+            }
+            return log;
+        }
+
+        // De-elevated launch: grobyq runs as admin, so starting an app directly would run it elevated (Chrome loses drag and
+        // drop, Discord runs as admin). explorer.exe runs at medium integrity, so the app it opens inherits the normal user
+        // token - the same as double-clicking it.
+        private static void ShellOpen(string path)
+        {
+            var pr = Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = "\"" + path + "\"", UseShellExecute = false });
+            if (pr != null) { try { pr.Dispose(); } catch { } }
+        }
+
         private void AdviceOnce(List<string> log, string key, string msg)
         {
             if (_adviceOnce.Contains(key)) return;
@@ -539,7 +612,7 @@ namespace Grobyq
             foreach (var m in Masks.Advice(topo, mask)) AdviceOnce(log, "advice:" + m, m);
 
             Preset preset; Presets.TryGetValue(target, out preset);
-            string cls = preset != null ? preset.Class : "High";
+            string cls = preset != null ? preset.Class : "Normal";
             string io = preset != null ? preset.Io : "Normal";
             string mem = preset != null ? preset.Mem : "Normal";
             if (!PRIO.ContainsKey(cls) || string.Equals(cls, "Realtime", StringComparison.OrdinalIgnoreCase)) cls = "High";   // never Realtime
@@ -641,7 +714,7 @@ namespace Grobyq
                     if (!snap.Ok || snap.Rows.Count == 0) { AdviceOnce(log, "nothr:" + p.Id, "[!!] threads not accessible"); }
                     else
                     {
-                        var cand = Masks.IdealCandidates(topo, o.SkipCpu0, mask.Mask);
+                        var cand = Masks.IdealCandidates(topo, false, mask.Mask);   // CPU 0 is a valid Ideal CPU for hot threads (no reservation)
                         var done = new HashSet<uint>();
                         string pre = p.Id + ":";
                         var alive = new HashSet<string>(snap.Rows.Select(r => pre + r.Tid));
@@ -880,6 +953,7 @@ namespace Grobyq
                 string gate = Gate(b, Op.Process, ProtectedPriorityAllowed);
                 if (gate != null) { AdviceOnce(log, "gate:bg:" + bn, gate); continue; }
                 if (targets.Contains(b) || targets.Contains(bn + ".exe")) continue;   // a game in the background list is still the game
+                if (IsClose(b)) continue;                                             // marked "Close": the game-mode close path handles it, not the lowering layer
                 foreach (var bp in Procs(b))
                 {
                     int lvl, err;
@@ -955,7 +1029,7 @@ namespace Grobyq
                 catch { } finally { Native.CloseHandle(hp); }
             }
             _appliedBg.Clear(); LastBg = 0; BgOn = false;
-            log.Add(string.Format("[BG] released {0} background processes (game lost focus)", n));
+            log.Add(string.Format("[BG] released {0} background processes (no game running, or the background layer is off)", n));
             return log;
         }
 
@@ -1015,7 +1089,8 @@ namespace Grobyq
             }
 
             // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer).
-            // ApplyAll runs only inside a game session (Optimizer), which already encodes "the game is in front".
+            // ApplyAll runs only inside a game session (Optimizer), which already encodes the session rule (the game runs, or
+            // in foreground mode runs and is in front).
             bool userBg = o.Game && o.DoBackground, sysBg = o.Sys && SystemBg.Count > 0;
             if (userBg || sysBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
             else if (BgOn) foreach (var l in BgRelease()) log.Add(l);

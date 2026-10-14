@@ -103,10 +103,11 @@ namespace Grobyq
                 { "MaskCpu", "" },                // CPU layout signature the edits were made on (GameMask.CpuSig)
                 { "IrqPOnly", "1" },              // interrupt recommender on a hybrid CPU: P-cores only (untick to allow E-cores)
                 { "TopN", "4" },
-                { "SkipCpu0", "1" },
                 { "Period", "2000" },            // 2 s: 1 s is re-scan overhead, 5 s can miss threads spawned on map load
                 { "BgAffinity", "1" },
-                { "BgForeground", "1" },
+                // v4.0: the session follows the game PROCESS - applied once at launch, kept through alt-tab, restored when the
+                // game exits. On = the old foreground mode (minimize / alt-tab restores, back in the game applies again).
+                { "BgForeground", "0" },
                 { "BgProcs", DefaultBgProcs },
                 // v4 manual mode: a first run changes NOTHING. The optimizer does not arm at start and every optimization
                 // switch starts off; the user picks what to apply, presses Save, then ENABLE. Mechanism settings (period,
@@ -118,6 +119,7 @@ namespace Grobyq
                 { "DoMask", "0" },                // game core mask (affinity + CPU sets)
                 { "DoThreads", "0" },
                 { "DoBackground", "0" },
+                { "CloseBackground", "0" },       // game mode: close the programs marked "Close" when the game launches, reopen them when it exits (opt-in)
                 { "DoAffRules", "0" },
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
@@ -178,6 +180,18 @@ namespace Grobyq
                     if (k != null) k.SetValue(name, value ?? "", RegistryValueKind.String);
             }
             catch { }
+        }
+
+        // One-time move to the v4.0 session rule (the game process, not the foreground): an install that stored the old
+        // foreground mode - a v3.6.8 profile import or the old alt-tab switch - gets the new default once. The switch stays on
+        // Threads for anyone who wants the foreground mode back. Returns a log line, or "" when nothing changed.
+        public static string MigrateSessionDefault()
+        {
+            if (Get("MigratedSession") == "1") return "";
+            bool had = Stored("BgForeground") && GetBool("BgForeground");
+            Reset("BgForeground");
+            Set("MigratedSession", "1");
+            return had ? "[i] session rule: now follows the game process (applied at launch, kept through alt-tab, restored when the game exits); 'Only while the game is in front' on Threads brings the foreground mode back" : "";
         }
 
         // Back to the first-run default: the stored value is removed, so Get answers the default again.

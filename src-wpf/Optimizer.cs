@@ -15,11 +15,12 @@ namespace Grobyq
     //                              background list, affinity rules) for the chosen games.
     //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...).
     //
-    // Session = a chosen game runs and its window is in front ("Only while the game is in front", on by default; off =
-    // while the game runs). Session start: everything switched on is applied once. During the session a catch-up pass
-    // every 2 s ("Catch new threads") handles only what is new: the engine reads each value back and writes only what
-    // differs, and a thread gets its Ideal CPU once. Session end (alt-tab, minimize, the game closes): every baseline is
-    // restored - normal mode. Outside a session nothing is applied, whatever the switches say.
+    // Session = a chosen game runs (v4.0 default), or - with "Only while the game is in front" on - runs AND its window is
+    // in front. Session start: everything switched on is applied once. During the session a catch-up pass every 2 s
+    // ("Catch new threads") handles only what is new: the engine reads each value back and writes only what differs, and a
+    // thread gets its Ideal CPU once. Session end (the game closes; in foreground mode also alt-tab / minimize): every
+    // baseline is restored - normal mode. Outside a session nothing is applied, whatever the switches say.
+    // Game mode (opt-in) rides on the game PROCESS in both modes: marked apps close at launch and reopen at exit.
     //
     // Engine calls run on one worker thread, in order (apply, catch-up, restore): a restore queued after an apply always
     // lands last. Results go to AppLog; StateChanged fires on the UI thread when something visible changed.
@@ -44,7 +45,7 @@ namespace Grobyq
         public bool GameOn => _game;                 // game threads optimizer switch
         public bool SysOn => _sys;                   // system threads optimizer switch
         public bool Active => _game || _sys;
-        public bool InSession => _session;           // a game is in front: what is switched on is applied
+        public bool InSession => _session;           // a game session: what is switched on is applied
         public string LiveTarget => _liveTarget;     // running games (comma separated), "" = none
         // OFF = both switches off; ARMED = on, no game session (waiting, or the game is minimized); ACTIVE = applied
         public string StateName => !Active ? "OFF" : _session ? "ACTIVE" : "ARMED";
@@ -54,6 +55,9 @@ namespace Grobyq
         public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
         // "Only while the game is in front" (the old "release background on alt-tab" key, now for everything)
         public static bool FrontOnly { get { return Settings.GetBool("BgForeground"); } }
+        // Game mode: close the apps marked "Close" when the game process appears, reopen them when it is gone. Keyed on the
+        // game PROCESS, not the foreground - alt-tabbing to the browser must not slam it shut, closing is for the whole match.
+        public static bool CloseBgOn { get { return Settings.GetBool("CloseBackground"); } }
 
         public Optimizer()
         {
@@ -62,6 +66,8 @@ namespace Grobyq
             if (Eng.Targets == null || Eng.Targets.Length == 0) Eng.Targets = new[] { "cs2.exe" };
             Eng.AffRules = Settings.LoadAffRules();
             try { var m = Store.Migrate362(Eng); if (m != null && m.Count > 0) AppLog.Add(m); } catch { }
+            try { var m2 = Store.MigrateNormalClass(Eng); if (m2 != null && m2.Count > 0) AppLog.Add(m2); } catch { }
+            try { string m3 = Settings.MigrateSessionDefault(); if (m3.Length > 0) AppLog.Add(m3); } catch { }
 
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }
@@ -72,7 +78,7 @@ namespace Grobyq
             _sys = Settings.GetBool("SystemThreadOpt");
             if (_sys) { try { Eng.LoadSystemProfile(true); } catch { } }
             _game = Settings.GetBool("GameOpt");
-            if (Active) AppLog.Add("[i] " + Which() + " threads optimizer on - waiting for a game in front");
+            if (Active) AppLog.Add("[i] " + Which() + " threads optimizer on - waiting for a game" + (FrontOnly ? " in front" : ""));
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += (s, e) => Tick();
@@ -166,8 +172,8 @@ namespace Grobyq
             Settings.Set("SystemThreadOpt", on ? "1" : "0");
             try { Eng.LoadSystemProfile(on); } catch { }
             if (on)
-                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes; priority and boost only, anti-cheats skipped{2}; applied while a game is in front)",
-                    Eng.SystemPresets.Count, Eng.SystemBg.Count, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped"));
+                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes; priority and boost only, anti-cheats skipped{2}; applied while a game {3})",
+                    Eng.SystemPresets.Count, Eng.SystemBg.Count, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped", FrontOnly ? "is in front" : "runs"));
             else AppLog.Add("=== SYSTEM THREADS OPTIMIZER OFF ===");
             Evaluate(true);
         }
@@ -182,6 +188,7 @@ namespace Grobyq
             try { Eng.LoadSystemProfile(false); } catch { }
             _session = false;
             if (was) { AppLog.Add("=== OPTIMIZERS OFF ==="); QueueRevert(); }
+            Queue(() => Eng.RelaunchClosed());                        // game mode off too: reopen anything it closed (no-op if nothing)
             Evaluate(false);
         }
 
@@ -200,23 +207,46 @@ namespace Grobyq
         // "Only while the game is in front" changed: the session follows at once.
         public void Refresh() { Evaluate(false); }
 
+        // The "Close background on game launch" switch was flipped: close now if a game is already running and the mode is on;
+        // reopen whatever was closed if the mode is now off. Everything grobyq closes is reversible, like every other part.
+        public void CloseModeChanged()
+        {
+            if (CloseBgOn)
+            {
+                string now = RunningGames();
+                _liveTarget = now;                                  // keep presence in sync so Evaluate sees no spurious transition
+                if (now.Length > 0) Queue(() => Eng.CloseForGame());
+            }
+            else
+            {
+                Queue(() => Eng.RelaunchClosed());                  // in order after any close still queued; a no-op when nothing was closed
+                if (!Active) _liveTarget = "";                      // nothing watches the game now: its next start is seen fresh
+            }
+        }
+
         // ------------------------------------------------------------------ the session
         // Re-evaluates the session now. rebuild = what is applied changed (a switch, Save): restore, then apply afresh.
         private void Evaluate(bool rebuild)
         {
-            string now = Active ? RunningGames() : "";
+            string now = (Active || CloseBgOn) ? RunningGames() : "";
+            bool appeared = false, gone = false;
             if (now != _liveTarget)
             {
-                if (now.Length > 0 && _liveTarget.Length == 0) AppLog.Add("[>>] game started: " + now);
-                else if (now.Length == 0 && _liveTarget.Length > 0) AppLog.Add("[<<] game closed: " + _liveTarget);
+                bool wasEmpty = _liveTarget.Length == 0;
+                appeared = now.Length > 0 && wasEmpty;
+                gone = now.Length == 0 && !wasEmpty;
+                if (appeared) AppLog.Add("[>>] game started: " + now);
+                else if (gone) AppLog.Add("[<<] game closed: " + _liveTarget);
                 _liveTarget = now;
             }
+            // game mode: the marked apps close BEFORE the session applies (the background layer then has nothing to lower)...
+            if (appeared && CloseBgOn) Queue(() => Eng.CloseForGame());
             bool front = now.Length > 0 && (!FrontOnly || Eng.GameForeground());
             bool want = Active && front;
             if (want && !_session)
             {
                 _session = true;
-                AppLog.Add("[>>] " + now + " in front - " + Which() + " optimization on");
+                AppLog.Add("[>>] " + now + (FrontOnly ? " in front - " : " running - ") + Which() + " optimization on");
                 QueueApply(true);
             }
             else if (!want && _session)
@@ -230,6 +260,11 @@ namespace Grobyq
                 QueueRevert();
                 QueueApply(true);
             }
+            // ...and reopen AFTER the session restore, so they start into a system that is back to normal. Keyed on what
+            // grobyq actually closed: turning the mode off mid-match still brings the apps back when the game exits. Queued
+            // even if nothing is recorded yet - a close job still in the queue (a game that died right after launch) runs
+            // first on the same worker, and the reopen is a no-op when nothing was closed.
+            if (gone && (Eng.HasClosed || CloseBgOn)) Queue(() => Eng.RelaunchClosed());
             string sig = Active + "|" + _session + "|" + _liveTarget + "|" + _game + "|" + _sys;
             if (rebuild || sig != _stateSig) { _stateSig = sig; StateChanged?.Invoke(); }
         }
@@ -255,7 +290,6 @@ namespace Grobyq
             MaskName = _game ? GameRule() : Settings.Get("Mask"),   // the game mask matters (and is logged) only for the game layer
             BgMaskName = GameMask.ManualRule(SafeTopo()),
             TopN = Math.Max(1, Math.Min(32, Settings.GetInt("TopN", 4))),
-            SkipCpu0 = Settings.GetBool("SkipCpu0"),
             DoProcess = Settings.GetBool("DoProcess"),
             DoMask = Settings.GetBool("DoMask"),
             DoThreads = Settings.GetBool("DoThreads"),
@@ -278,7 +312,7 @@ namespace Grobyq
             try
             {
                 _tick++;
-                if (Active || _session) Evaluate(false);
+                if (Active || _session || CloseBgOn) Evaluate(false);   // close-mode polls for the game even with both optimizers off
 
                 // catch-up inside the session: new threads only (reads everything, writes what differs)
                 if (_session && Settings.GetBool("PeriodicReapply"))
