@@ -377,12 +377,14 @@
                         <Border x:Name="bd" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
                             <ContentPresenter />
                         </Border>
+                        <!-- 4.0.9: hover first, selected last - the chosen item keeps its accent under the mouse instead of
+                             flicking to the hover grey (it looked as if the choice moved) -->
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccDim}" />
-                            </Trigger>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="bd" Property="Background" Value="{StaticResource CardHi}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccDim}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

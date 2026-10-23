@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 
 namespace Grobyq.Pages
@@ -12,19 +13,21 @@ namespace Grobyq.Pages
     // Threads > Reference (4.0.7): what the game threads optimizer sets for one game, each setting in one place. Header: the
     // game, a pill that says whether this PC runs the built-in reference of this version or its own rules, Restore
     // reference. Then the process settings (priority class, I/O and memory priority, EcoQoS, process boost). The thread
-    // rules live in Advanced settings only (when it is folded, one line says what they set). Every edit is a draft: Save
-    // writes presets.json and re-applies - at once in a running game session.
+    // rules live in Advanced settings only (4.0.9: no summary line; the section unfolds smoothly; the patterns of the
+    // built-in rules are fixed). Every edit is a draft: Save writes presets.json and re-applies - at once in a running
+    // game session.
     public sealed partial class ThreadsPage
     {
         private ComboBox _pick, _cls, _io, _mem, _eco, _pboost;
-        private TextBlock _clsDesc, _ioDesc, _memDesc, _threadLine, _stateText;
+        private TextBlock _clsDesc, _ioDesc, _memDesc, _stateText;
         private Ellipse _stateDot;
         private StackPanel _rulesHost, _editHost;
         private TextBlock _rulesEmpty;
         private Button _restore, _editBtn;
         private readonly Dictionary<string, Preset> _edit = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);  // draft copies
         private string _cur;
-        private bool _pload;
+        private bool _pload, _editOpen;
+        private int _foldGen;
 
         private static readonly string[] Levels = { "Idle", "Lowest", "BelowNormal", "Normal", "AboveNormal", "Highest", "TimeCritical" };
 
@@ -79,18 +82,14 @@ namespace Grobyq.Pages
             _eco.SelectionChanged += (s, e) => Edit(p => p.Eco = Combo.Val(_eco) == "Keep" ? "Keep" : "Off");
             _pboost.SelectionChanged += (s, e) => Edit(p => p.Boost = Combo.Val(_pboost));
 
-            // ---- thread rules: one line while folded, Advanced settings on the right ----
+            // ---- Advanced settings on the right (4.0.9: no summary line next to it) ----
             var foot = new Grid { Margin = new Thickness(0, 10, 0, 10) };
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            _threadLine = Ui.Text("", 8.75, "Dim");
-            _threadLine.VerticalAlignment = VerticalAlignment.Center;
-            _threadLine.Margin = new Thickness(0, 0, 16, 0);
-            foot.Children.Add(_threadLine);
             _editBtn = Ui.Btn(L.T("Advanced settings"), "BtnOutline");
             _editBtn.Height = 30;
             _editBtn.VerticalAlignment = VerticalAlignment.Center;
-            _editBtn.Click += (s, e) => ShowEditor(_editHost.Visibility != Visibility.Visible);
+            _editBtn.Click += (s, e) => ShowEditor(!_editOpen);
             Grid.SetColumn(_editBtn, 1);
             foot.Children.Add(_editBtn);
             card.Add(foot);
@@ -116,12 +115,45 @@ namespace Grobyq.Pages
             _editHost.Children.Add(strip);
         }
 
-        // the folded line names the rules; open, the editor itself shows them (no list twice)
         private void ShowEditor(bool show)
         {
-            _editHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            _editOpen = show;
             _editBtn.Content = show ? L.T("Hide advanced settings") : L.T("Advanced settings");
-            _threadLine.Visibility = show ? Visibility.Hidden : Visibility.Visible;
+            Fold(_editHost, show);
+        }
+
+        // 4.0.9: the section unfolds and folds smoothly (height + fade, 240 ms, ease-out) instead of appearing at once.
+        // A click during the motion turns it around from where it is; at the end the height is Auto again, so rules
+        // added later still fit.
+        private void Fold(FrameworkElement host, bool show)
+        {
+            int gen = ++_foldGen;
+            double from = host.Visibility == Visibility.Visible ? host.ActualHeight : 0;
+            double to = 0;
+            if (show)
+            {
+                host.Visibility = Visibility.Visible;
+                var parent = host.Parent as FrameworkElement;
+                double w = host.ActualWidth > 0 ? host.ActualWidth : parent != null ? parent.ActualWidth : 0;
+                host.BeginAnimation(FrameworkElement.HeightProperty, null);
+                host.Height = double.NaN;
+                host.Measure(new Size(w > 0 ? w : double.PositiveInfinity, double.PositiveInfinity));
+                to = host.DesiredSize.Height;
+            }
+            host.ClipToBounds = true;
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var dur = new Duration(TimeSpan.FromMilliseconds(240));
+            var h = new DoubleAnimation(from, to, dur) { EasingFunction = ease };
+            h.Completed += (s, e) =>
+            {
+                if (gen != _foldGen) return;                   // a newer click took over
+                host.BeginAnimation(FrameworkElement.HeightProperty, null);
+                host.Height = double.NaN;
+                if (!show) host.Visibility = Visibility.Collapsed;
+            };
+            double o0 = show ? (from > 0 ? host.Opacity : 0) : host.Opacity;
+            host.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(o0, show ? 1 : 0, dur) { EasingFunction = ease });
+            host.BeginAnimation(FrameworkElement.HeightProperty, h);
         }
 
         private static Border ComboRow(string title, string desc, ComboBox c, out TextBlock d, bool divider = true)
@@ -179,24 +211,11 @@ namespace Grobyq.Pages
         }
 
         // ------------------------------------------------------------------ state
-        // The pill, Restore reference and the folded thread line ("Thread rules: MainThrd 15 · GlobPool 9 ...": each enabled
-        // rule with the base priority it gives).
+        // The pill and Restore reference.
         private void UpdateRefState()
         {
-            if (_cur == null) { _threadLine.Text = ""; _stateText.Text = ""; _stateDot.Fill = Ui.B("Faint"); _restore.Visibility = Visibility.Collapsed; return; }
+            if (_cur == null) { _stateText.Text = ""; _stateDot.Fill = Ui.B("Faint"); _restore.Visibility = Visibility.Collapsed; return; }
             var p = Source(_cur);
-            int cb = ClassBase(p.Class);
-            var parts = new List<string>();
-            foreach (var r in p.Threads)
-            {
-                string pat = (r.Pattern ?? "").Trim();
-                if (!r.Enabled || pat.Length == 0) continue;
-                int off;
-                string lvl = !Engine.ThreadPrio(r.Prio, out off) ? L.T("keep")
-                           : (off == -15 ? 1 : off == Engine.TimeCriticalValue ? 15 : Math.Max(1, Math.Min(15, cb + off))).ToString(CultureInfo.InvariantCulture);
-                parts.Add(pat.Trim('*') + " " + lvl);
-            }
-            _threadLine.Text = parts.Count == 0 ? L.T("No thread rules: only the process settings above apply.") : L.F("Thread rules: {0}", string.Join("  ·  ", parts));
             bool has = Store.HasBuiltin(_cur), same = has && Store.IsBuiltin(_cur, p);
             _stateText.Text = same ? L.T("built-in reference") : has ? L.T("your rules") : L.T("no built-in reference");
             _stateText.Foreground = Ui.B(same ? "Fg" : "Dim");
@@ -386,14 +405,18 @@ namespace Grobyq.Pages
             if (_cur == null) { _rulesEmpty.Visibility = Visibility.Visible; return; }
             var p = Source(_cur);
             int cb = ClassBase(p.Class);
+            // 4.0.9: the patterns of the built-in reference rules are fixed; rules added with "Add rule" stay editable
+            var fixedPats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Preset d;
+            if (Store.Defaults().TryGetValue(_cur, out d)) foreach (var t in d.Threads) { string fp = (t.Pattern ?? "").Trim(); if (fp.Length > 0) fixedPats.Add(fp); }
             bool was = _pload;
             _pload = true;
-            try { for (int i = 0; i < p.Threads.Count; i++) _rulesHost.Children.Add(RuleRow(p.Threads[i], i, p.Threads.Count, cb)); }
+            try { for (int i = 0; i < p.Threads.Count; i++) _rulesHost.Children.Add(RuleRow(p.Threads[i], i, p.Threads.Count, cb, fixedPats.Contains((p.Threads[i].Pattern ?? "").Trim()))); }
             finally { _pload = was; }
             _rulesEmpty.Visibility = p.Threads.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private FrameworkElement RuleRow(ThreadRule r, int i, int count, int classBase)
+        private FrameworkElement RuleRow(ThreadRule r, int i, int count, int classBase, bool fixedPattern)
         {
             var g = RuleGrid();
             g.Margin = new Thickness(0, 0, 0, 6);
@@ -419,6 +442,18 @@ namespace Grobyq.Pages
             note.Margin = new Thickness(2, 3, 0, 0);
             SetNote(note, r.Pattern);
             patCol.Children.Add(note);
+            if (fixedPattern)
+            {
+                // a fixed line: no caret, no typing, no focus; the tooltip says why (on the cell - the box ignores the mouse)
+                pat.IsReadOnly = true;
+                pat.Focusable = false;
+                pat.IsTabStop = false;
+                pat.IsHitTestVisible = false;
+                pat.Background = Ui.B("Card");
+                pat.BorderBrush = Ui.B("Line");
+                patCol.Background = Brushes.Transparent;
+                patCol.ToolTip = L.T("Built-in pattern of the reference: it stays as it is. Priority, Ideal CPU and boost can be changed.");
+            }
             pat.TextChanged += (s, e) =>
             {
                 string v = (pat.Text ?? "").Trim();

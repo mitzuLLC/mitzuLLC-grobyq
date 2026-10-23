@@ -1357,9 +1357,7 @@
  "Advanced settings": "Додаткові налаштування",
  "Hide advanced settings": "Сховати додаткові налаштування",
  "Thread priority = process class base + thread level. With the class Normal (base 8): Normal 8, Above normal 9, High (Highest) 10, Time critical 15 - the top of the normal range; real-time levels (16-31) exist only in the Realtime class, which grobyq never sets. A thread at 15 wins every contest on its core: give it to one thread and judge by frame-time (1% low), not average FPS.": "Пріоритет потоку = база класу процесу + рівень потоку. За класу «Звичайний» (база 8): Звичайний 8, Вище середнього 9, Високий (найвищий) 10, Критичний за часом 15 — верх звичайного діапазону; рівні реального часу (16–31) є лише в класу Realtime, який grobyq не ставить ніколи. Потік на 15 виграє в усіх на своєму ядрі: давай його одному потоку й суди за frame-time (1% low), а не за середнім FPS.",
- "No thread rules: only the process settings above apply.": "Правил потоків немає: діють лише налаштування процесу вище.",
  "Saved - applies when the game starts.": "Збережено — застосується під час запуску гри.",
- "Thread rules: {0}": "Правила потоків: {0}",
  "A running browser is skipped: close it first.": "Запущений браузер пропускається: спершу закрийте його.",
  "App caches": "Кеші програм",
  "Asks again before deleting and shows how many and how big.": "Перед видаленням перепитує й показує, скільки файлів і якого розміру.",
@@ -1416,5 +1414,6 @@
  "{0} is running: close it to clean.": "Запущено: {0} — закрийте, щоб очистити.",
  "• Anti-cheat folders (FACEIT, Vanguard, Easy Anti-Cheat, BattlEye): never touched.": "• Папки античитів (FACEIT, Vanguard, Easy Anti-Cheat, BattlEye): ніколи не зачіпаються.",
  "• Sign-ins, cookies, history and saved passwords of browsers and apps: cleaning them only logs you out.": "• Входи, cookies, історія та збережені паролі браузерів і програм: їх очищення лише розлогінить вас.",
- "• Spotify downloads, Telegram chats and keys, Steam settings, game saves and recordings.": "• Завантаження Spotify, чати й ключі Telegram, налаштування Steam, збереження ігор і записи."
+ "• Spotify downloads, Telegram chats and keys, Steam settings, game saves and recordings.": "• Завантаження Spotify, чати й ключі Telegram, налаштування Steam, збереження ігор і записи.",
+ "Built-in pattern of the reference: it stays as it is. Priority, Ideal CPU and boost can be changed.": "Вбудований шаблон еталона: він не змінюється. Пріоритет, ідеальний CPU і підвищення змінювати можна."
 }
