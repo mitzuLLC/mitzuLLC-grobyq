@@ -341,6 +341,10 @@ namespace Grobyq
 
         public static bool HasBackup(string inst) { return LoadBackup().ContainsKey(inst); }
 
+        // Device instance IDs grobyq holds an original for (it changed their interrupt settings). The Affinity
+        // maintenance page (4.0.3) offers to restore them all while the editor is closed.
+        public static List<string> BackedUp() { return LoadBackup().Keys.ToList(); }
+
         public static string RestoreIrq(string inst)
         {
             var all = LoadBackup();

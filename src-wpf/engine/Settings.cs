@@ -106,14 +106,15 @@ namespace Grobyq
                 { "Period", "2000" },            // 2 s: 1 s is re-scan overhead, 5 s can miss threads spawned on map load
                 { "BgAffinity", "0" },            // 4.0.2: background feature removed (key kept so old values read as off)
                 { "BgProcs", DefaultBgProcs },
-                // v4 manual mode: a first run changes NOTHING. Both optimizers start off and every optional part is off;
-                // the user picks what to apply and presses Save. The session always follows the game process (applied at
+                // v4 manual mode: a first run changes NOTHING. Both optimizers start off and the core parts are off; the
+                // user picks what to apply and presses Save. 4.0.3: the thread rules start ON - they act only once the game
+                // threads optimizer is switched on, which then applies the whole game preset (owner decision). The session always follows the game process (applied at
                 // launch, caught up every 2 s, restored when the game exits); the mechanism setting (period) keeps its
                 // default - it only acts on a chosen part.
                 { "AutoEnable", "0" },
                 { "CloseToTray", "1" },
                 { "DoMask", "0" },                // game core mask (affinity + CPU sets)
-                { "DoThreads", "0" },
+                { "DoThreads", "1" },             // 4.0.3: on by default (Threads > Thread rules > Apply thread rules)
                 { "DoBackground", "0" },          // 4.0.2: background list removed (key kept so old values read as off)
                 { "CloseBackground", "0" },       // 4.0.2: game mode removed (Optimizer.CloseBgOn is always false)
                 { "DoAffRules", "0" },

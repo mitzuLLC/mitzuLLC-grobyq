@@ -12,8 +12,8 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Version>4.0.2</Version>
-    <FileVersion>4.0.2.0</FileVersion>
+    <Version>4.0.3</Version>
+    <FileVersion>4.0.3.0</FileVersion>
     <Product>grobyq by mitzu LLC</Product>
     <Company>mitzu LLC</Company>
     <ApplicationManifest>app.manifest</ApplicationManifest>

@@ -40,7 +40,7 @@ namespace Grobyq
             {
                 { "home",     () => new HomePage() },
                 { "threads",  () => new ThreadsPage() },
-                { "affinity", () => new AffinityPage() },
+                { "affinity", () => Brand.AffinityOpen ? (UserControl)new AffinityPage() : new MaintenancePage() },   // 4.0.3: closed for rework
                 { "clean",    () => new CleanupPage() },
                 { "log",      () => new JournalPage() },
                 { "settings", () => new SettingsPage() },

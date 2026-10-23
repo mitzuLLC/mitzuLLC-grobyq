@@ -50,7 +50,10 @@ namespace Grobyq
         public string StateName => !Active ? "OFF" : _session ? "ACTIVE" : "ARMED";
 
         // The optional parts of the game optimizer (Settings keys); the preset's process part applies on top of these anyway.
-        public static readonly string[] Parts = { "DoMask", "DoThreads", "DoAffRules" };   // 4.0.2: background list removed
+        // 4.0.2: background list removed. 4.0.3: while Affinity is closed only the thread rules are a part.
+        private static readonly string[] AllParts = { "DoMask", "DoThreads", "DoAffRules" };
+        private static readonly string[] ThreadParts = { "DoThreads" };
+        public static string[] Parts { get { return Brand.AffinityOpen ? AllParts : ThreadParts; } }
         public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
         // Game mode: close the apps marked "Close" when the game process appears, reopen them when it is gone.
         public static bool CloseBgOn { get { return false; } }   // 4.0.2: game mode (close / reopen background apps) is removed - never on, whatever an old stored value says
@@ -64,7 +67,8 @@ namespace Grobyq
             try { var m = Store.Migrate362(Eng); if (m != null && m.Count > 0) AppLog.Add(m); } catch { }
             try { var m2 = Store.MigrateNormalClass(Eng); if (m2 != null && m2.Count > 0) AppLog.Add(m2); } catch { }
             try { var m3 = Store.MigrateHighThreads(Eng); if (m3 != null && m3.Count > 0) AppLog.Add(m3); } catch { }
-            try { var m4 = Store.MigrateSafe402(Eng); if (m4 != null && m4.Count > 0) AppLog.Add(m4); } catch { }   // after 4.0.1: Highest -> Above normal
+            try { var m4 = Store.MigrateSafe402(Eng); if (m4 != null && m4.Count > 0) AppLog.Add(m4); } catch { }   // render Highest / keep -> Above normal, no Ideal CPU
+            try { var m5 = Store.MigrateMain403(Eng); if (m5 != null && m5.Count > 0) AppLog.Add(m5); } catch { }   // after it: main thread -> Highest
 
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }
@@ -157,7 +161,9 @@ namespace Grobyq
             _game = on;
             Settings.Set("GameOpt", on ? "1" : "0");
             AppLog.Add(on ? "=== GAME THREADS OPTIMIZER ON ===" : "=== GAME THREADS OPTIMIZER OFF ===");
-            if (on && !AnyPartOn) AppLog.Add("[i] only the game preset's process part applies (thread rules and cores are off): switch them on in Threads / Affinity and press Save");
+            if (on && !AnyPartOn) AppLog.Add(Brand.AffinityOpen
+                ? "[i] only the game preset's process part applies (thread rules and cores are off): switch them on in Threads / Affinity and press Save"
+                : "[i] only the game preset's process part applies (thread rules are off): switch Apply thread rules on in Threads and press Save");
             Evaluate(true);
         }
 
@@ -280,13 +286,13 @@ namespace Grobyq
 
         public ApplyOptions Opts() => new ApplyOptions
         {
-            MaskName = _game ? GameRule() : Settings.Get("Mask"),   // the game mask matters (and is logged) only for the game layer
+            MaskName = _game && Brand.AffinityOpen ? GameRule() : Settings.Get("Mask"),   // the game mask matters (and is logged) only for the game layer
             BgMaskName = GameMask.ManualRule(SafeTopo()),
-            DoMask = Settings.GetBool("DoMask"),
+            DoMask = Brand.AffinityOpen && Settings.GetBool("DoMask"),            // 4.0.3: Affinity closed - its parts are not applied
             DoThreads = Settings.GetBool("DoThreads"),
             DoBackground = false,                                   // 4.0.2: the user background list is removed
             BgAffinity = false,
-            DoAffRules = Settings.GetBool("DoAffRules"),
+            DoAffRules = Brand.AffinityOpen && Settings.GetBool("DoAffRules"),
             Game = _game,
             Sys = _sys,
             Warmup = false

@@ -107,6 +107,12 @@ namespace Grobyq
             get { return L.T("Ideal CPU is a scheduler hint, not a pin: Windows prefers that LP but may run the thread elsewhere. auto spreads the matched threads over separate physical cores inside the game mask."); }
         }
 
+        // 4.0.3: the Match column of the thread rules is set by the pattern (ThreadRule.MatchFor)
+        public static string MatchKind
+        {
+            get { return L.T("Set by the pattern: a file name (.dll, .exe, .node) matches the module the thread starts in; anything else matches the thread description (GetThreadDescription)."); }
+        }
+
         public static string Boost
         {
             get { return L.T("Priority boost = short dynamic boosts after waits (I/O completion, input, GUI). Off keeps the priority fixed; keep lets Windows decide."); }

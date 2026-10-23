@@ -63,7 +63,7 @@ namespace Grobyq.Pages
             var rc = Card();
             // 4.0.2: the "Optimize threads" switch (it used to sit alone under "Game optimizer") lives here, with what it turns on
             rc.Add(SwitchRow(L.T("Apply thread rules"), L.T("The rules below set the picked game's thread priority, boost and, where a rule sets it, Ideal CPU. Off = no thread of the game is touched."), "DoThreads"));
-            var rdesc = rc.Add(Ui.Text(L.T("Top to bottom; the first matching rule wins for a thread. Match by thread description (GetThreadDescription) or by the module its start address is in. Applied when Apply thread rules is on."), 8.75, "Dim"));
+            var rdesc = rc.Add(Ui.Text(L.T("Top to bottom; the first matching rule wins for a thread. A pattern with a file name (.dll, .exe) matches the module the thread starts in, any other pattern matches the thread description (GetThreadDescription). Known threads get a caption under the pattern. Applied when Apply thread rules is on."), 8.75, "Dim"));
             rdesc.Margin = new Thickness(0, 8, 0, 10);
             rc.Add(RulesHeader());
             _rulesHost = rc.Add(new StackPanel());
@@ -258,7 +258,7 @@ namespace Grobyq.Pages
             var g = RuleGrid();
             g.Margin = new Thickness(0, 0, 0, 6);
             string[] heads = { L.T("On"), L.T("Match"), L.T("Pattern (wildcards * ?)"), L.T("Priority"), L.T("Ideal CPU"), L.T("Boost") };
-            string[] tips = { null, null, null, Explain.ThreadPriority, Explain.IdealCpu, Explain.Boost };
+            string[] tips = { null, Explain.MatchKind, null, Explain.ThreadPriority, Explain.IdealCpu, Explain.Boost };
             for (int i = 0; i < heads.Length; i++)
             {
                 var t = Ui.Semi(heads[i], 8.25, "Faint");
@@ -290,16 +290,31 @@ namespace Grobyq.Pages
             on.CheckedChanged += () => Edit(p => p.Threads[i].Enabled = on.Checked);
             Put(g, on, 0);
 
-            var match = Combo.New(CMatch, new[] { new Opt("desc", L.T("description")), new Opt("module", L.T("module")) });
-            Combo.Select(match, string.Equals(r.Match, "module", StringComparison.OrdinalIgnoreCase) ? "module" : "desc");
-            match.SelectionChanged += (s, e) => Edit(p => p.Threads[i].Match = Combo.Val(match));
-            Put(g, match, 1);
+            // 4.0.3: the match kind is not a choice any more - it follows the pattern (ThreadRule.MatchFor): a file name is
+            // the module the thread starts in, anything else the thread description. An untouched row shows what it stores
+            // (that is what the engine matches by); typing a pattern sets both. Known threads get a caption (ThreadNotes).
+            var kindText = Ui.Text(KindText(r.Match), 8.75, "Dim", false);
+            kindText.VerticalAlignment = VerticalAlignment.Center;
+            var kind = new Border { Height = 30, Width = CMatch, CornerRadius = new CornerRadius(6), Background = Ui.B("Input"), Padding = new Thickness(10, 0, 10, 0), HorizontalAlignment = HorizontalAlignment.Left, Child = kindText, ToolTip = Explain.MatchKind, SnapsToDevicePixels = true };
+            Put(g, kind, 1);
 
+            var patCol = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
             var pat = Ui.Box(r.Pattern, double.NaN);
             pat.HorizontalAlignment = HorizontalAlignment.Stretch;
-            pat.Margin = new Thickness(0, 0, 8, 0);
-            pat.TextChanged += (s, e) => Edit(p => p.Threads[i].Pattern = (pat.Text ?? "").Trim());
-            Put(g, pat, 2);
+            patCol.Children.Add(pat);
+            var note = Ui.Text("", 8.25, "Faint");
+            note.Margin = new Thickness(2, 3, 0, 0);
+            SetNote(note, r.Pattern);
+            patCol.Children.Add(note);
+            pat.TextChanged += (s, e) =>
+            {
+                string v = (pat.Text ?? "").Trim();
+                string m = ThreadRule.MatchFor(v);
+                Edit(p => { p.Threads[i].Pattern = v; p.Threads[i].Match = m; });
+                kindText.Text = KindText(m);
+                SetNote(note, v);
+            };
+            Put(g, patCol, 2);
 
             var prio = Combo.New(CPrio, PrioOpts());
             Combo.Select(prio, r.Prio ?? "");
@@ -321,7 +336,22 @@ namespace Grobyq.Pages
             acts.Children.Add(IconBtn("down", L.T("Down"), i < count - 1, () => Move(i, 1)));
             acts.Children.Add(IconBtn("x", L.T("Remove"), true, () => { Edit(p => p.Threads.RemoveAt(i)); FillRules(); }));
             Put(g, acts, 6);
+            foreach (FrameworkElement c in g.Children) c.VerticalAlignment = VerticalAlignment.Top;   // a caption grows the pattern cell downwards only
+            on.Margin = new Thickness(-4, 1, 0, 0);                    // the 28 px controls sit centred on the 30 px line
+            acts.Margin = new Thickness(0, 1, 0, 0);
             return g;
+        }
+
+        private static string KindText(string match)
+        {
+            return string.Equals(match, "module", StringComparison.OrdinalIgnoreCase) ? L.T("module") : L.T("description");
+        }
+
+        private static void SetNote(TextBlock note, string pattern)
+        {
+            string t = ThreadNotes.For(pattern);
+            note.Text = t;
+            note.Visibility = t.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private int _lps = -1;

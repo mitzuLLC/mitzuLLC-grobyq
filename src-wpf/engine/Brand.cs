@@ -26,6 +26,11 @@ namespace Grobyq
         public const string AerialUrl = "https://aerialos.vercel.app";
         public const string AerialDiscord = "https://dsc.gg/aerialos";
 
+        // 4.0.3: Affinity is closed for rework. Its sidebar item opens a "technical work" page (Pages/MaintenancePage) and
+        // the optimizer ignores its two parts (game core mask, per-process rules) while this is false. The page code stays
+        // and is still built by the selftest, so reopening is this one flag.
+        public static readonly bool AffinityOpen = false;
+
         public static string Version
         {
             get { try { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } catch { return "?"; } }

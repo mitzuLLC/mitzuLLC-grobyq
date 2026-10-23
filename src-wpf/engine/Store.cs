@@ -19,6 +19,18 @@ namespace Grobyq
         public string Tid = "";            // "" all matches | first | last | N : which matching thread the rule touches (creation order approx by TID)
         public bool Enabled = true;
         public ThreadRule Clone() { return (ThreadRule)MemberwiseClone(); }
+
+        // 4.0.3: the match kind follows the pattern (Threads > Thread rules has no desc / module choice any more): a file
+        // name - .dll .exe .node .sys .drv, wildcards allowed (steamclient*.dll) - is the module the thread starts in;
+        // anything else is the thread description (GetThreadDescription). A module pattern without an extension reads as
+        // a description, so the editor's rules always carry one.
+        private static readonly string[] ModuleExt = { ".dll", ".exe", ".node", ".sys", ".drv" };
+        public static string MatchFor(string pattern)
+        {
+            string s = (pattern ?? "").Trim().TrimEnd('*', '?').ToLowerInvariant();
+            foreach (var e in ModuleExt) if (s.EndsWith(e, StringComparison.Ordinal)) return "module";
+            return "desc";
+        }
     }
 
     // Everything grobyq sets on one target process.
@@ -63,12 +75,12 @@ namespace Grobyq
                 // starve the very threads it waits on (DWM, Steam IPC); any win has to come from the thread rules, not
                 // from a blanket class bump. Raise it per game in the preset if a title needs it.
                 var s2 = new Preset { Exe = exe, Class = "Normal", Io = "Normal", Mem = "Normal" };
-                // the frame's critical path - main thread (simulation) and render thread (submission to the driver) - one
-                // step above normal-priority threads (Above normal). 4.0.2: no longer Highest and no Ideal CPU - two
-                // Highest threads can pre-empt each other and the Source 2 job workers, and a fixed Ideal CPU can fight the
-                // game's own scheduling; both are suspects for the 4.0.1 frame-time regression (T2, not isolated yet).
-                // Judge any change in CapFrameX (avg / 1% low), grobyq off vs on.
-                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Prio = "AboveNormal" });
+                // the frame's critical path. 4.0.3 (owner decision): the main thread (simulation - every frame starts there)
+                // at Highest, the render thread (submission to the driver) at Above normal, no Ideal CPU. With the class at
+                // Normal that is priority 10 / 9 against 8 for normal threads. 4.0.1 ran both at Highest with an Ideal CPU
+                // (a suspect for its frame-time regression, T2, not isolated yet). Judge any change in CapFrameX
+                // (avg / 1% low), grobyq off vs on.
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Prio = "Highest" });
                 s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Prio = "AboveNormal" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "embree3.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "phonon.dll", Prio = "Lowest" });
@@ -98,10 +110,12 @@ namespace Grobyq
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        // One-time update (4.0.2): safe defaults for the frame-time fix. A saved cs2 / dota2 preset whose main / render rule
-        // still holds an old built-in value (4.0.1 Highest, 4.0.0 keep) goes to Above normal, and their "auto" Ideal CPU is dropped. The
-        // game core mask, the user background list and the game mode (close apps) are switched off - the background
-        // feature is removed; ctfmon / TextInputHost are handled by the system threads optimizer now. Runs once.
+        // One-time update (4.0.2): safe defaults for the frame-time fix. A saved cs2 / dota2 preset whose render rule still
+        // holds an old built-in value (4.0.1 Highest, 4.0.0 keep) goes to Above normal, and the "auto" Ideal CPU of the main
+        // and render rules is dropped. The main thread's priority is MigrateMain403's (4.0.3: Highest), so an update from
+        // 4.0.0 / 4.0.1 never flips it twice. The game core mask, the user background list and the game mode (close apps)
+        // are switched off - the background feature is removed; ctfmon / TextInputHost are handled by the system threads
+        // optimizer now. Runs once.
         public static List<string> MigrateSafe402(Engine eng)
         {
             var log = new List<string>();
@@ -114,15 +128,16 @@ namespace Grobyq
                 foreach (var r in p.Threads)
                 {
                     if (!string.Equals(r.Match, "desc", StringComparison.OrdinalIgnoreCase)) continue;
-                    bool critical = string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase) || string.Equals(r.Pattern, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase);
-                    if (!critical) continue;
-                    // Highest = the 4.0.1 built-in value; keep (empty) = the 4.0.0 built-in render rule. Anything else is the user's.
-                    if (string.Equals(r.Prio, "Highest", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(r.Prio))
+                    bool main = string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase);
+                    bool render = string.Equals(r.Pattern, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase);
+                    if (!main && !render) continue;
+                    // render: Highest = the 4.0.1 built-in value; keep (empty) = the 4.0.0 built-in rule. Anything else is the user's.
+                    if (render && (string.Equals(r.Prio, "Highest", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(r.Prio)))
                     { string was = string.IsNullOrEmpty(r.Prio) ? "keep" : r.Prio; r.Prio = "AboveNormal"; any = true; log.Add("[i] " + exe + ": " + r.Pattern + " " + was + " -> Above normal (4.0.2 safe default)"); }
                     if (string.Equals(r.Ideal, "auto", StringComparison.OrdinalIgnoreCase)) { r.Ideal = ""; any = true; log.Add("[i] " + exe + ": " + r.Pattern + " Ideal CPU auto -> none (4.0.2 safe default)"); }
                 }
             }
-            if (Settings.GetBool("DoMask")) { Settings.Set("DoMask", "0"); log.Add("[i] game core mask switched off (4.0.2 safe default; Affinity > Cores turns it back on)"); }
+            if (Settings.GetBool("DoMask")) { Settings.Set("DoMask", "0"); log.Add("[i] game core mask switched off (4.0.2 safe default)"); }
             if (Settings.GetBool("DoBackground") || Settings.GetBool("CloseBackground") || Settings.BgProcs().Length > 0)
                 log.Add("[i] background processes removed (4.0.2): ctfmon.exe and TextInputHost.exe are in the system threads optimizer now");
             Settings.Set("DoBackground", "0");
@@ -172,6 +187,34 @@ namespace Grobyq
             }
             if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
             Settings.Set("MigratedNormalClass", "1");
+            return log;
+        }
+
+        // One-time update (4.0.3, owner decision): the main thread of a saved cs2 / dota2 preset goes to Highest when its rule
+        // still holds a value grobyq shipped as built-in (4.0.0 Above normal, 4.0.2 Above normal, keep); Highest stays. Any
+        // other value is the user's and stays. Runs once, after MigrateSafe402.
+        public static List<string> MigrateMain403(Engine eng)
+        {
+            var log = new List<string>();
+            if (Settings.Get("Migrated403") == "1") return log;
+            bool any = false;
+            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
+            {
+                Preset p;
+                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
+                foreach (var r in p.Threads)
+                {
+                    if (!string.Equals(r.Match, "desc", StringComparison.OrdinalIgnoreCase) || !string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.Equals(r.Prio, "AboveNormal", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(r.Prio))
+                    {
+                        string was = string.IsNullOrEmpty(r.Prio) ? "keep" : "Above normal";
+                        r.Prio = "Highest"; any = true;
+                        log.Add("[i] " + exe + ": *MainThrd* " + was + " -> Highest (4.0.3 default; change it in the game preset if you want)");
+                    }
+                }
+            }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
+            Settings.Set("Migrated403", "1");
             return log;
         }
 

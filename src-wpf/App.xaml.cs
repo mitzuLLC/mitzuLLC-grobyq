@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -235,6 +236,20 @@ namespace Grobyq
             chk("masks", () => { var t = Topo.Live(); return Masks.Options(t).Count > 0 && Masks.Build(t, Masks.Recommended(t)).Mask != 0; });
             chk("game mask", () => GameMask.Info(Topo.Live(), false, null).Base != 0);
             chk("presets", () => new Engine(new[] { "cs2.exe" }).Presets != null);
+            chk("thread rules", () =>
+            {
+                // 4.0.3: built-in main / render priorities, the editor's match inference (the built-in rules agree with it)
+                // and the thread captions (translated: the protected build reads the language table)
+                L.Load("ru");
+                var d = Store.Defaults()["cs2.exe"].Threads;
+                bool prios = d.Any(r => r.Pattern == "*MainThrd*" && r.Prio == "Highest") && d.Any(r => r.Pattern == "*D3D11RenderThread*" && r.Prio == "AboveNormal");
+                bool match = ThreadRule.MatchFor("steamclient*.dll") == "module" && ThreadRule.MatchFor("*MainThrd*") == "desc" && ThreadRule.MatchFor("") == "desc";
+                bool kinds = d.All(r => ThreadRule.MatchFor(r.Pattern) == r.Match);
+                string main = ThreadNotes.For("*MainThrd*");
+                bool notes = ThreadNotes.Count > 20 && main.Length > 0 && !main.StartsWith("Game main thread", StringComparison.Ordinal) && ThreadNotes.For("no_such_thread") == "";
+                log.Add("      thread rules: " + d.Count + " built-in cs2 rules, " + ThreadNotes.Count + " thread captions");
+                return prios && match && kinds && notes;
+            });
             chk("cleaner", () => Cleaner.Items().Count > 0);
             chk("hwid", () => GrobLic.Hwid().Length > 0);
             chk("license url", () => Licensing.ListUrl.StartsWith("https://", StringComparison.Ordinal) &&
@@ -263,7 +278,7 @@ namespace Grobyq
             chk("pages", () =>
             {
                 L.Load("ru");
-                var pages = new System.Windows.Controls.UserControl[] { new Pages.HomePage(), new Pages.ThreadsPage(), new Pages.AffinityPage(), new Pages.CleanupPage(), new Pages.SettingsPage(), new Pages.AboutPage(), new Pages.JournalPage() };
+                var pages = new System.Windows.Controls.UserControl[] { new Pages.HomePage(), new Pages.ThreadsPage(), new Pages.AffinityPage(), new Pages.MaintenancePage(), new Pages.CleanupPage(), new Pages.SettingsPage(), new Pages.AboutPage(), new Pages.JournalPage() };
                 return pages.Length == 7;
             });
             // JIT every method of the assembly: an obfuscation layer that emits invalid IL fails here, at build time,
