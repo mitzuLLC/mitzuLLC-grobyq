@@ -5,28 +5,27 @@
 [SETTINGS]
 sleep=10000
 
-; The games this profile was written for. grobyq waits for the games on its own list (Threads > Games); this list is informational.
-[GAMES]
-VALORANT-Win64-Shipping
-cs2
-FortniteClient-Win64-Shipping
-
+; 4.0.4 (grobyq): no game sections. The game threads optimizer runs the built-in game presets (the reference on
+; Threads), and this profile never touches a watched game anyway.
 
 ; 4.0.2 (grobyq): the background lists are cut down (owner decision) - Discord, browsers, launchers and peripheral
 ; software are no longer lowered while the game runs. Only the two text-input processes step aside. grobyq never
-; suspends: an entry is lowered to Idle priority while the game runs and restored when it exits.
+; suspends: an entry is lowered to Idle priority while the game runs and restored when it exits. 4.0.4: every thread
+; of both goes to Idle too (sections [textinputhost] and [ctfmon] below).
 [SETPROCESSESTOIDLEPRIORITY]
 ctfmon
 TextInputHost
 
-; A list of processes for which a priority boost will leave
+; Process priority boost off (SetProcessPriorityBoost): every thread of these processes keeps its base priority.
+; 4.0.4 boost policy (owner decision). A boost is the short lift Windows gives a thread that wakes for an event - input,
+; I/O completion, a window message - and it decays every quantum. It stays wherever a thread has to wake on time:
+; audio (audiodg, the audio service in svchost), composition and input (dwm, csrss, ctfmon), system services
+; (svchost, winlogon). Their priorities below are unchanged. It is off only for background apps that do bulk work
+; while you play: from a normal base, a boosted thread of theirs reaches the game threads' level for a moment.
 [DISABLEBOOST]
 explorer
-dwm
-audiodg
 gamingservices
 gamingservicesnet
-svchost
 rundll32
 ShellHost
 msedgewebview2
@@ -36,65 +35,11 @@ NVIDIA Overlay
 nvcontainer
 NVDisplay.Container
 WMIADAP
-winlogon
 WmiPrvSE
 dllhost
 RuntimeBroker
 discord
 AerialTool_Threads
-
-[VALORANT-Win64-Shipping]
-description=*BackgroundThreadPool*, -15
-description=*FTelemetryWorker*, -15
-description=*LogWorker*, -15
-description=*ScreenSaverInhibitor*, -15
-description=*TelemetrySched*, -15
-module=VALORANT-Win64-Shipping.exe, -1
-
-[cs2]
-description=*D3D11RenderThread*, -1
-description=*MainThrd*, -1
-module=steamnetworkingsockets.dll, -1
-module=embree3.dll, -1
-module=phonon.dll, -1
-module=nvwgf2umx.dll, -15, tid=last
-module=video64.dll, -15
-module=steamclient64.dll, 300
-
-[dota2]
-description=*D3D11RenderThread*, -1
-module=InputHost.dll, 300
-module=SDL3.dll, -15
-module=steamnetworkingsockets.dll, -1
-module=embree3.dll, -1
-module=phonon.dll, -1
-module=video64.dll, -15
-module=nvwgf2umx.dll, -15, tid=last
-
-[FortniteClient-Win64-Shipping]
-description=*GameInput (LGI)*, -15
-description=*GameInput (Dispatcher)*, -15
-description=*AudioMixerNullCallbackThread*, -15
-description=*CrashReportingThread*, 300
-description=*GameThread*, -1
-description=*RHIInterruptThread*, -15
-description=*RHISubmissionThread*, -15
-description=*RHIThread*, -15
-description=*IoService*, -15
-description=*FHeartBeatThread*, -15
-description=*ThreadedTickWebSocketThread*, -15
-description=*LibwebsocketsThread*, -15
-description=*WindowsRawInputThread*, -15
-description=*Background Worker #2*, -15
-description=*Foreground Worker (Standby #1)*, -15
-description=*Foreground Worker (Standby #2)*, -15
-description=*Foreground Worker #0*, -15
-description=*Foreground Worker #1*, -15
-description=*Electra audio segment loader*, -15
-description=*HttpManagerThread*, -15
-description=*ElectraHTTPStream*, -15
-description=*OnlineAsyncTaskThreadMcp DefaultInstance*, -15
-description=*RenderThread 0*, -1
 
 [spotify]
 module=libcef.dll, -1
@@ -196,21 +141,22 @@ module=nvprofileupdaterplugin.dll, 300
 module=_DisplayDriverRAS.dll, 300
 module=ntdll.dll, -15
 
+; 4.0.4: every DWM thread stays at Idle (owner decision); boost back on - composition and input wake on events.
 [dwm]
-description=*DWM Kernel Sensor*, -15, disableboost
-description=*DWM Master Input*, -15, disableboost
-description=*DWM Token Thread*, -15, disableboost
-description=*DWM LPC Port Thread*, -15, disableboost
-description=*DWM Compositor Thread*, -15, disableboost
-description=*DWM Manipulation Thread*, -15, disableboost
+description=*DWM Kernel Sensor*, -15
+description=*DWM Master Input*, -15
+description=*DWM Token Thread*, -15
+description=*DWM LPC Port Thread*, -15
+description=*DWM Compositor Thread*, -15
+description=*DWM Manipulation Thread*, -15
 module=nvwgf2umx.dll, -15, tid=last
-module=dwmcore.dll, -15, disableboost
+module=dwmcore.dll, -15
 module=GameInput.dll, 200
-module=ntdll.dll, -15, disableboost
+module=ntdll.dll, -15
 module=ISM.dll, -15
 module=Windows.Gaming.Input.dll, 300
-module=dwmredir.dll, -15, disableboost
-module=DispBroker.dll, -15, disableboost
+module=dwmredir.dll, -15
+module=DispBroker.dll, -15
 module=uDWM.dll, -15
 
 [searchapp]
@@ -250,10 +196,11 @@ module=sihost.exe, -15, disableboost
 module=winmm.dll, -15
 module=taskhostw.exe, -15
 
+; 4.0.4: Idle as before, boost back on (input / console).
 [csrss]
-module=winsrvext*, -15, disableboost
-module=csrsrv*, -15, disableboost
-module=cdd.dll, -15, disableboost
+module=winsrvext*, -15
+module=csrsrv*, -15
+module=cdd.dll, -15
 
 [dllhost]
 module=esent.dll, -15
@@ -264,13 +211,15 @@ module=Windows.UI.Xaml.dll, 0
 [shellexperiencehost]
 module=Windows.UI.Xaml.dll, 0
 
+; 4.0.4: every thread at Idle (owner decision) - XAML and direct manipulation too; the catch-all last line takes the rest.
 [textinputhost]
-module=Windows.UI.Xaml.dll, 0
-module=directmanipulation.dll, 0
+module=Windows.UI.Xaml.dll, -15
+module=directmanipulation.dll, -15
 module=TextInputHost.exe, -15
 module=SHCore.dll, -15
 module=nvwgf2umx.dll, -15
 module=MrmCoreR.dll, -15
+module=*, -15
 
 [conhost]
 module=conhost.exe, -15
@@ -294,15 +243,18 @@ module=MsSpellCheckingFacility.dll, 300
 module=twinui.pcshell.dll, -15
 module=InputHost.dll, 300
 
+; 4.0.4: every thread at Idle (owner decision), boost back on (text input wakes on keystrokes); the catch-all
+; last line takes the threads no line above names.
 [ctfmon]
 module=ctfmon.exe, -15
-module=InputHost.dll, -15, disableboost
-module=InputService.dll, -15, disableboost
+module=InputHost.dll, -15
+module=InputService.dll, -15
 module=msctf.dll, -15
-module=combase.dll, -15, disableboost
+module=combase.dll, -15
 module=MTFServer.dll, -15
-module=ntdll.dll, -15, disableboost
+module=ntdll.dll, -15
 module=MsCtfMonitor.dll, 300
+module=*, -15
 
 [ayugram]
 module=ayugram.exe, -1

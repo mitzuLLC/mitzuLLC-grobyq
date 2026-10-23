@@ -61,9 +61,10 @@ namespace Grobyq.Pages
                 try { Directory.CreateDirectory(Store.Dir); Process.Start(new ProcessStartInfo { FileName = Store.Dir, UseShellExecute = true }); } catch { }
             };
             dc.Add(Ui.Row(L.T("Data folder"), L.F("Presets, profiles and the backups grobyq makes before it changes anything: {0}", Store.Dir), open));
-            var reset = Ui.Btn(L.T("Reset settings"), "BtnDangerQuiet");
-            reset.Click += (s, e) => ResetSettings();
-            dc.Add(Ui.Row(L.T("Reset grobyq settings"), L.T("Mask, watch list, toggles and window options back to the first-run defaults (HKCU\\Software\\grobyq). Presets, backups and the license are not touched."), reset, false));
+            // 4.0.4: one factory reset for the whole app (the same on Threads), applied at once - no restart
+            var reset = Ui.Btn(L.T("Factory reset"), "BtnDangerQuiet");
+            reset.Click += (s, e) => OptUi.FactoryReset(Window.GetWindow(this));
+            dc.Add(Ui.Row(L.T("Reset to factory settings"), L.T("grobyq as after a fresh install: both optimizers off and every change back, settings, games and the thread reference to the first-run defaults, autostart off. The language, the license and the Affinity backups stay."), reset, false));
         }
 
         private static Border ToggleRow(string title, string desc, string key)
@@ -150,7 +151,7 @@ namespace Grobyq.Pages
             }
         }
 
-        private static bool TaskExists()
+        internal static bool TaskExists()
         {
             try
             {
@@ -165,7 +166,7 @@ namespace Grobyq.Pages
             catch { return false; }
         }
 
-        // ------------------------------------------------------------------ language / reset
+        // ------------------------------------------------------------------ language
         private void Switch(string code)
         {
             if (code == L.Code) return;
@@ -174,22 +175,6 @@ namespace Grobyq.Pages
             AppLog.Add("[UI] interface language = " + L.Cur.English);
             var w = MainWindow.Current;
             if (w != null) w.RebuildUi();
-        }
-
-        private void ResetSettings()
-        {
-            if (!Dlg.Ask(null, L.T("Reset all grobyq settings to the first-run defaults? Presets, backups and the license stay."), true)) return;
-            string lang = L.Code;
-            var o = Optimizer.Instance;
-            if (o != null) o.StopAll();                    // the switches go off with the settings: every baseline back first
-            try
-            {
-                Registry.CurrentUser.DeleteSubKeyTree(@"Software\grobyq", false);
-                using (var k = Registry.CurrentUser.CreateSubKey(@"Software\grobyq")) k.SetValue("Language", lang);
-            }
-            catch (Exception ex) { AppLog.Add("[!!] reset: " + ex.Message); return; }
-            AppLog.Add("[UI] settings reset to defaults - restart grobyq to reload everything");
-            Dlg.Info(null, L.T("Done. Restart grobyq so every page reloads the defaults."));
         }
     }
 }

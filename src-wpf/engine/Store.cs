@@ -45,6 +45,10 @@ namespace Grobyq
         public string HotFirst = "AboveNormal";   // 4.0.2: hot threads removed - unused, kept so presets.json still
         public string HotOthers = "";             //        round-trips through 4.0.1
         public bool Enabled = true;               // include this process in the "programs & services" bulk pass
+        // 4.0.4: this preset is the built-in reference (presets.json "builtin"). A saved preset marked so is replaced by the
+        // reference of the running version when presets.json loads, so an update brings the new reference; an edit saved on
+        // Threads clears it, Restore reference / a factory reset set it again.
+        public bool Builtin;
         public List<ThreadRule> Threads = new List<ThreadRule>();
 
         public Preset Clone()
@@ -75,13 +79,21 @@ namespace Grobyq
                 // starve the very threads it waits on (DWM, Steam IPC); any win has to come from the thread rules, not
                 // from a blanket class bump. Raise it per game in the preset if a title needs it.
                 var s2 = new Preset { Exe = exe, Class = "Normal", Io = "Normal", Mem = "Normal" };
-                // the frame's critical path. 4.0.3 (owner decision): the main thread (simulation - every frame starts there)
-                // at Highest, the render thread (submission to the driver) at Above normal, no Ideal CPU. With the class at
-                // Normal that is priority 10 / 9 against 8 for normal threads. 4.0.1 ran both at Highest with an Ideal CPU
-                // (a suspect for its frame-time regression, T2, not isolated yet). Judge any change in CapFrameX
-                // (avg / 1% low), grobyq off vs on.
+                // The built-in reference: the frame's critical path. With the class at Normal: Highest = 10, Above normal = 9,
+                // normal threads 8.
+                //   MainThrd           Highest      4.0.3 (owner decision): simulation, every frame starts here. The game
+                //                                   sets Highest itself (T0 capture), so this keeps it there.
+                //   D3D11RenderThread  Above normal submission to the driver; the game sets Above normal itself too.
+                //   GlobPool/0..N      Above normal 4.0.4 (owner decision): the Source 2 job pool. The main thread hands
+                //                                   each frame's jobs to it and waits for every worker (fork-join, T3), so
+                //                                   one worker preempted by a normal-priority thread holds up the frame. The
+                //                                   game leaves them at Normal (T0: 5 workers, ~56% of the game's cycles in
+                //                                   online DM); one step up keeps them under the main thread.
+                // No Ideal CPU (4.0.1 used one: a frame-time regression suspect, T2) and no boost change - every game
+                // thread keeps Windows' priority boost (T0: all on). Judge any change in CapFrameX (avg / 1% low).
                 s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Prio = "Highest" });
                 s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Prio = "AboveNormal" });
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*GlobPool*", Prio = "AboveNormal" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "embree3.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "phonon.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "video64.dll", Prio = "BelowNormal" });
@@ -100,6 +112,7 @@ namespace Grobyq
                 fn.Threads.Add(new ThreadRule { Pattern = n, Prio = "Idle", Boost = "Off" });
             fn.Threads.Add(new ThreadRule { Pattern = "*Background Worker*", Prio = "BelowNormal" });
             d[fn.Exe] = fn;
+            foreach (var p in d.Values) p.Builtin = true;
             return d;
         }
 
@@ -108,6 +121,79 @@ namespace Grobyq
             // 4.0.2: the user background list is gone (owner decision). ctfmon.exe and
             // TextInputHost.exe moved into the system threads optimizer (bundled profile, [SETPROCESSESTOIDLEPRIORITY]).
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        // ---------------- the built-in reference ----------------
+        // 4.0.4: the Threads page shows whether a game runs the reference built into this version or the user's own rules.
+        // Compared is what the engine applies: the process part and every thread rule in order. The retired hot-thread
+        // fields and the bulk-pass flag are not part of it; a pattern compares without case (the engine matches it so).
+        private static Dictionary<string, Preset> _builtin;
+        private static Dictionary<string, Preset> Builtin { get { return _builtin ?? (_builtin = Defaults()); } }
+
+        public static bool HasBuiltin(string exe) { return !string.IsNullOrEmpty(exe) && Builtin.ContainsKey(exe); }
+
+        // true = p is exactly the built-in reference of exe (false for a game without one)
+        public static bool IsBuiltin(string exe, Preset p)
+        {
+            Preset b;
+            if (p == null || string.IsNullOrEmpty(exe) || !Builtin.TryGetValue(exe, out b)) return false;
+            return RefSig(p) == RefSig(b);
+        }
+
+        private static string RefSig(Preset p)
+        {
+            Func<string, string> n = s => (s ?? "").Trim().ToLowerInvariant();
+            var parts = new List<string> { n(p.Class), n(p.Io), n(p.Mem), n(p.Eco) == "keep" ? "keep" : "off", n(p.Boost).Length == 0 ? "keep" : n(p.Boost) };
+            foreach (var r in p.Threads)
+                parts.Add(string.Join("\u0001", r.Enabled ? "1" : "0", n(r.Match), n(r.Pattern), n(r.Prio), n(r.Ideal), n(r.Boost), n(r.Tid)));
+            return string.Join("\u0002", parts);
+        }
+
+        // Every start, after the one-time updates: a saved preset that equals the built-in reference is marked as such (so
+        // the next update replaces it with the new reference), and one that differs is not. Returns log lines.
+        public static List<string> MarkBuiltin(Engine eng)
+        {
+            var log = new List<string>();
+            bool any = false;
+            foreach (var kv in eng.Presets)
+            {
+                if (kv.Value == null || !HasBuiltin(kv.Key)) continue;
+                bool b = IsBuiltin(kv.Key, kv.Value);
+                if (kv.Value.Builtin == b) continue;
+                kv.Value.Builtin = b; any = true;
+                log.Add("[i] " + kv.Key + ": " + (b ? "runs the built-in reference (follows grobyq updates)" : "runs your rules (kept through updates)"));
+            }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) log.Add("[!!] presets.json: " + err); }
+            return log;
+        }
+
+        // One-time update (4.0.4, owner decision): a saved cs2 / dota2 preset without a GlobPool rule gets the built-in one
+        // (*GlobPool* -> Above normal) right after its main / render rules - a 4.0.3 built-in preset becomes the 4.0.4
+        // reference exactly. A preset that already has a rule naming GlobPool keeps it (the user's). Runs once, after
+        // MigrateMain403.
+        public static List<string> MigrateGlob404(Engine eng)
+        {
+            var log = new List<string>();
+            if (Settings.Get("Migrated404") == "1") return log;
+            bool any = false;
+            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
+            {
+                Preset p;
+                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
+                if (p.Threads.Any(r => (r.Pattern ?? "").IndexOf("globpool", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                int at = 0;
+                for (int i = 0; i < p.Threads.Count; i++)
+                {
+                    string pat = p.Threads[i].Pattern ?? "";
+                    if (string.Equals(pat, "*MainThrd*", StringComparison.OrdinalIgnoreCase) || string.Equals(pat, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase)) at = i + 1;
+                }
+                p.Threads.Insert(at, new ThreadRule { Match = "desc", Pattern = "*GlobPool*", Prio = "AboveNormal" });
+                any = true;
+                log.Add("[i] " + exe + ": *GlobPool* -> Above normal added (4.0.4 reference: the Source 2 job pool one step up)");
+            }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
+            Settings.Set("Migrated404", "1");
+            return log;
         }
 
         // One-time update (4.0.2): safe defaults for the frame-time fix. A saved cs2 / dota2 preset whose render rule still
@@ -237,6 +323,13 @@ namespace Grobyq
                 if (root == null) return;
                 var ps = ReadPresets(root);
                 if (ps.Count > 0 || root.ContainsKey("presets")) presets = ps;   // an emptied set stays empty
+                // 4.0.4: a preset saved as the built-in reference follows the running version's reference
+                var now = Defaults();
+                foreach (var exe in presets.Keys.ToList())
+                {
+                    Preset cur, nb;
+                    if (presets.TryGetValue(exe, out cur) && cur != null && cur.Builtin && now.TryGetValue(exe, out nb)) presets[exe] = nb;
+                }
                 var b = ReadMap(root, "background");
                 if (b != null) bg = b;
             }
@@ -445,7 +538,7 @@ namespace Grobyq
             return new Dictionary<string, object>
             {
                 { "exe", p.Exe }, { "class", p.Class }, { "io", p.Io }, { "mem", p.Mem }, { "eco", p.Eco }, { "boost", p.Boost },
-                { "hotFirst", p.HotFirst }, { "hotOthers", p.HotOthers }, { "on", p.Enabled },
+                { "hotFirst", p.HotFirst }, { "hotOthers", p.HotOthers }, { "on", p.Enabled }, { "builtin", p.Builtin },
                 { "threads", p.Threads.Select(t => (object)new Dictionary<string, object>
                     { { "match", t.Match }, { "pattern", t.Pattern }, { "prio", t.Prio }, { "ideal", t.Ideal }, { "boost", t.Boost }, { "tid", t.Tid ?? "" }, { "enabled", t.Enabled } }).ToList() },
             };
@@ -468,6 +561,7 @@ namespace Grobyq
                     Eco = S(m, "eco", "Off"), Boost = S(m, "boost", "Keep"), HotFirst = S(m, "hotFirst", "AboveNormal"), HotOthers = S(m, "hotOthers", ""),
                 };
                 p.Enabled = S(m, "on", "true").ToLowerInvariant() != "false";
+                p.Builtin = S(m, "builtin", "false").ToLowerInvariant() == "true";   // missing (before 4.0.4) = not marked; MarkBuiltin decides
                 if (p.Exe.Length == 0) continue;
                 if (string.Equals(p.Class, "Realtime", StringComparison.OrdinalIgnoreCase)) p.Class = "High";   // hard boundary
                 object thO;

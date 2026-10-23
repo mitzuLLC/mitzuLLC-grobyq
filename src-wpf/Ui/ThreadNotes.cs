@@ -14,6 +14,7 @@ namespace Grobyq
             // ---- Source 2 (CS2, Dota 2): thread descriptions ----
             { "mainthrd", L.N("Game main thread: simulation and frame preparation - every frame starts here.") },
             { "d3d11renderthread", L.N("Render thread: hands the prepared frame to the D3D11 driver.") },
+            { "globpool", L.N("Job pool (GlobPool/0..N): the main thread splits each frame's work over these workers and waits for all of them.") },
             // ---- Source 2: modules ----
             { "embree3.dll", L.N("Intel Embree ray tracing, used by the game's sound (Steam Audio).") },
             { "phonon.dll", L.N("Steam Audio: spatial sound (direction, occlusion, reflections).") },

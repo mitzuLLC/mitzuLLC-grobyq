@@ -107,20 +107,20 @@ namespace Grobyq
                 { "BgAffinity", "0" },            // 4.0.2: background feature removed (key kept so old values read as off)
                 { "BgProcs", DefaultBgProcs },
                 // v4 manual mode: a first run changes NOTHING. Both optimizers start off and the core parts are off; the
-                // user picks what to apply and presses Save. 4.0.3: the thread rules start ON - they act only once the game
-                // threads optimizer is switched on, which then applies the whole game preset (owner decision). The session always follows the game process (applied at
-                // launch, caught up every 2 s, restored when the game exits); the mechanism setting (period) keeps its
-                // default - it only acts on a chosen part.
+                // user switches an optimizer on. 4.0.4: the game optimizer always applies the whole game preset - the built-in
+                // reference, or the user's edit of it - thread rules included (owner decision). The session always follows
+                // the game process (applied at launch, caught up every 2 s, restored when the game exits); the mechanism
+                // setting (period) keeps its default.
                 { "AutoEnable", "0" },
                 { "CloseToTray", "1" },
                 { "DoMask", "0" },                // game core mask (affinity + CPU sets)
-                { "DoThreads", "1" },             // 4.0.3: on by default (Threads > Thread rules > Apply thread rules)
+                { "DoThreads", "1" },             // 4.0.4: no switch any more - the thread rules are part of the game preset (Optimizer.Opts)
                 { "DoBackground", "0" },          // 4.0.2: background list removed (key kept so old values read as off)
                 { "CloseBackground", "0" },       // 4.0.2: game mode removed (Optimizer.CloseBgOn is always false)
                 { "DoAffRules", "0" },
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
-                { "AllowProtectedPriority", "0" }, // Advanced: priority on protected system processes (off by default)
+                { "AllowProtectedPriority", "0" }, // 4.0.4: the one-time yes to the system optimizer (its profile includes protected system processes)
                 { "RestoreOnExit", "1" },
                 { "AdvancedThreadMode", "0" },    // TimeCritical (15) selectable in thread rules (Advanced, warned)
                 { "LogOpen", "0" },            // the log starts folded: in a normal window the pages keep their full height

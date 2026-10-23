@@ -238,17 +238,22 @@ namespace Grobyq
             chk("presets", () => new Engine(new[] { "cs2.exe" }).Presets != null);
             chk("thread rules", () =>
             {
-                // 4.0.3: built-in main / render priorities, the editor's match inference (the built-in rules agree with it)
-                // and the thread captions (translated: the protected build reads the language table)
+                // 4.0.4: the built-in reference (main thread Highest, render thread and job pool Above normal, no boost change),
+                // the editor's match inference (the built-in rules agree with it), the reference check and the thread captions
+                // (translated: the protected build reads the language table)
                 L.Load("ru");
                 var d = Store.Defaults()["cs2.exe"].Threads;
-                bool prios = d.Any(r => r.Pattern == "*MainThrd*" && r.Prio == "Highest") && d.Any(r => r.Pattern == "*D3D11RenderThread*" && r.Prio == "AboveNormal");
+                bool prios = d.Any(r => r.Pattern == "*MainThrd*" && r.Prio == "Highest") && d.Any(r => r.Pattern == "*D3D11RenderThread*" && r.Prio == "AboveNormal")
+                          && d.Any(r => r.Pattern == "*GlobPool*" && r.Prio == "AboveNormal");
+                bool boost = d.All(r => string.IsNullOrEmpty(r.Boost));
                 bool match = ThreadRule.MatchFor("steamclient*.dll") == "module" && ThreadRule.MatchFor("*MainThrd*") == "desc" && ThreadRule.MatchFor("") == "desc";
                 bool kinds = d.All(r => ThreadRule.MatchFor(r.Pattern) == r.Match);
-                string main = ThreadNotes.For("*MainThrd*");
-                bool notes = ThreadNotes.Count > 20 && main.Length > 0 && !main.StartsWith("Game main thread", StringComparison.Ordinal) && ThreadNotes.For("no_such_thread") == "";
-                log.Add("      thread rules: " + d.Count + " built-in cs2 rules, " + ThreadNotes.Count + " thread captions");
-                return prios && match && kinds && notes;
+                bool reference = Store.IsBuiltin("cs2.exe", Store.Defaults()["cs2.exe"]) && Store.HasBuiltin("dota2.exe") && !Store.HasBuiltin("game.exe");
+                string main = ThreadNotes.For("*MainThrd*"), pool = ThreadNotes.For("*GlobPool*");
+                bool notes = ThreadNotes.Count > 20 && main.Length > 0 && !main.StartsWith("Game main thread", StringComparison.Ordinal)
+                          && pool.Length > 0 && !pool.StartsWith("Job pool", StringComparison.Ordinal) && ThreadNotes.For("no_such_thread") == "";
+                log.Add("      thread rules: " + d.Count + " built-in cs2 rules (MainThrd Highest, render + GlobPool Above normal), " + ThreadNotes.Count + " thread captions");
+                return prios && boost && match && kinds && reference && notes;
             });
             chk("cleaner", () => Cleaner.Items().Count > 0);
             chk("hwid", () => GrobLic.Hwid().Length > 0);
@@ -274,7 +279,21 @@ namespace Grobyq
             chk("splash", () => { var d = SplashData.Load(); return d != null && d.Frames.Count > 10 && SplashData.Decode(d.Frames[0]).PixelWidth > 0; });
             chk("gate windows", () => { L.Load("ru"); return LicenseWindow.Builds() && AerialOnlyWindow.Builds(); });
             chk("tray menu", () => { L.Load("ru"); var m = new TrayMenu(); m.Sync("ARMED", "", true, false); return m.Content != null; });
-            chk("system profile", () => { var r = ThreadIni.LoadBundled(); log.Add("      system profile: " + r.Presets.Count + " processes, " + r.BgClasses.Count + " background"); return r.Presets.Count > 10 && r.BgClasses.Count == 2 && r.BgClasses.ContainsKey("ctfmon.exe") && r.BgClasses.ContainsKey("TextInputHost.exe"); });   // 4.0.2: only the two text-input processes step aside
+            chk("system profile", () =>
+            {
+                // 4.0.2: only the two text-input processes step aside. 4.0.4: every thread of both at Idle (catch-all last);
+                // process boost off only for busy background apps - audio, composition, input and system services keep it;
+                // no game sections (the game presets own the games)
+                var r = ThreadIni.LoadBundled();
+                int boostOff = r.Presets.Values.Count(p => p.Boost == "Off");
+                Func<string, bool> keeps = exe => { Preset p; return !r.Presets.TryGetValue(exe, out p) || (p.Boost != "Off" && p.Threads.All(t => t.Boost != "Off")); };
+                Func<string, bool> idle = exe => { Preset p; return r.Presets.TryGetValue(exe, out p) && p.Threads.Count > 0 && p.Threads.All(t => t.Prio == "Idle") && p.Threads[p.Threads.Count - 1].Pattern == "*"; };
+                bool boost = keeps("dwm.exe") && keeps("audiodg.exe") && keeps("svchost.exe") && keeps("winlogon.exe") && keeps("csrss.exe") && keeps("ctfmon.exe") && boostOff >= 10;
+                bool text = idle("ctfmon.exe") && idle("TextInputHost.exe");
+                bool games = !r.Presets.ContainsKey("cs2.exe") && !r.Presets.ContainsKey("dota2.exe");
+                log.Add("      system profile: " + r.Presets.Count + " processes, " + r.BgClasses.Count + " background, process boost off for " + boostOff);
+                return r.Presets.Count > 10 && r.BgClasses.Count == 2 && r.BgClasses.ContainsKey("ctfmon.exe") && r.BgClasses.ContainsKey("TextInputHost.exe") && boost && text && games;
+            });
             chk("pages", () =>
             {
                 L.Load("ru");

@@ -11,8 +11,8 @@ namespace Grobyq
 {
     // Drives the engine with two switches and one rule for WHEN things apply: the game session.
     //
-    //   Game threads optimizer   - the game preset (its process part always, its thread rules with "Apply thread rules")
-    //                              plus the parts switched on and saved (core mask, affinity rules).
+    //   Game threads optimizer   - the game preset: the built-in reference (or the user's edit of it) - process part and
+    //                              thread rules - plus, once Affinity reopens, the parts switched on there.
     //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...), as written.
     //
     // Session = a chosen game is running (alt-tab changes nothing). Session start: everything switched on is applied once.
@@ -49,12 +49,8 @@ namespace Grobyq
         // OFF = both switches off; ARMED = on, waiting for a game; ACTIVE = applied
         public string StateName => !Active ? "OFF" : _session ? "ACTIVE" : "ARMED";
 
-        // The optional parts of the game optimizer (Settings keys); the preset's process part applies on top of these anyway.
-        // 4.0.2: background list removed. 4.0.3: while Affinity is closed only the thread rules are a part.
-        private static readonly string[] AllParts = { "DoMask", "DoThreads", "DoAffRules" };
-        private static readonly string[] ThreadParts = { "DoThreads" };
-        public static string[] Parts { get { return Brand.AffinityOpen ? AllParts : ThreadParts; } }
-        public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
+        // 4.0.4: the thread rules are not an optional part any more - they are the game preset, applied whenever the game
+        // optimizer is on (Opts). The Affinity parts (core mask, per-process rules) stay off while Affinity is closed.
         // Game mode: close the apps marked "Close" when the game process appears, reopen them when it is gone.
         public static bool CloseBgOn { get { return false; } }   // 4.0.2: game mode (close / reopen background apps) is removed - never on, whatever an old stored value says
 
@@ -69,9 +65,20 @@ namespace Grobyq
             try { var m3 = Store.MigrateHighThreads(Eng); if (m3 != null && m3.Count > 0) AppLog.Add(m3); } catch { }
             try { var m4 = Store.MigrateSafe402(Eng); if (m4 != null && m4.Count > 0) AppLog.Add(m4); } catch { }   // render Highest / keep -> Above normal, no Ideal CPU
             try { var m5 = Store.MigrateMain403(Eng); if (m5 != null && m5.Count > 0) AppLog.Add(m5); } catch { }   // after it: main thread -> Highest
+            try { var m6 = Store.MigrateGlob404(Eng); if (m6 != null && m6.Count > 0) AppLog.Add(m6); } catch { }   // then: + GlobPool Above normal
+            try { var m7 = Store.MarkBuiltin(Eng); if (m7 != null && m7.Count > 0) AppLog.Add(m7); } catch { }      // every start: reference or your rules
 
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }
+
+            // 4.0.4: the system optimizer always runs its whole built-in profile, protected system processes included (owner
+            // decision), and the first switch-on asks once (OptUi.System). An install left on after 4.0.3's "Without
+            // protected" answer goes off here and asks when it is switched on again: nothing new applies without that yes.
+            if (Settings.GetBool("SystemThreadOpt") && !Settings.GetBool("AllowProtectedPriority"))
+            {
+                Settings.Set("SystemThreadOpt", "0");
+                AppLog.Add("[i] system threads optimizer switched off: 4.0.4 runs the whole built-in profile (protected system processes included) - switch it on to confirm");
+            }
 
             new Thread(Work) { IsBackground = true, Name = "grobyq-engine", Priority = ThreadPriority.Normal }.Start();
 
@@ -161,9 +168,15 @@ namespace Grobyq
             _game = on;
             Settings.Set("GameOpt", on ? "1" : "0");
             AppLog.Add(on ? "=== GAME THREADS OPTIMIZER ON ===" : "=== GAME THREADS OPTIMIZER OFF ===");
-            if (on && !AnyPartOn) AppLog.Add(Brand.AffinityOpen
-                ? "[i] only the game preset's process part applies (thread rules and cores are off): switch them on in Threads / Affinity and press Save"
-                : "[i] only the game preset's process part applies (thread rules are off): switch Apply thread rules on in Threads and press Save");
+            if (on)
+            {
+                // which rules a session will run: the reference built into this version, or the user's edit of it
+                foreach (var t in Eng.Targets ?? new string[0])
+                {
+                    Preset p; Eng.Presets.TryGetValue(t, out p);
+                    if (p != null) AppLog.Add(string.Format("[i] {0}: {1} ({2} thread rules)", t, Store.IsBuiltin(t, p) ? "built-in reference" : Store.HasBuiltin(t) ? "your rules (differ from the built-in reference)" : "your rules", p.Threads.Count(r => r.Enabled && !string.IsNullOrEmpty(r.Pattern))));
+                }
+            }
             Evaluate(true);
         }
 
@@ -175,8 +188,11 @@ namespace Grobyq
             Settings.Set("SystemThreadOpt", on ? "1" : "0");
             try { Eng.LoadSystemProfile(on); } catch { }
             if (on)
-                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes; priority and boost only, anti-cheats skipped{2}; applied while a game {3})",
-                    Eng.SystemPresets.Count, Eng.SystemBg.Count, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped", "runs"));
+            {
+                int boostOff = Eng.SystemPresets.Values.Count(p => string.Equals(p.Boost, "Off", StringComparison.OrdinalIgnoreCase));
+                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes, process boost off for {2} background apps; priority and boost only, anti-cheats skipped{3}; applied while a game runs)",
+                    Eng.SystemPresets.Count, Eng.SystemBg.Count, boostOff, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped"));
+            }
             else AppLog.Add("=== SYSTEM THREADS OPTIMIZER OFF ===");
             Evaluate(true);
         }
@@ -193,6 +209,18 @@ namespace Grobyq
             if (was) { AppLog.Add("=== OPTIMIZERS OFF ==="); QueueRevert(); }
             Queue(() => Eng.RelaunchClosed());                        // game mode off too: reopen anything it closed (no-op if nothing)
             Evaluate(false);
+        }
+
+        // Factory reset, the engine part (OptUi.FactoryReset clears the settings key around it): both switches off and every
+        // baseline restored - the restore has run when this returns - then presets.json and the in-memory rules go back to
+        // the built-in defaults.
+        public void FactoryReset()
+        {
+            StopAll();
+            Drain(8000);
+            Eng.UnderLock(() => { Eng.Presets = Store.Defaults(); Eng.BgClasses = Store.DefaultBg(); Eng.AffRules.Clear(); });
+            string err = Eng.SavePresets();
+            if (err.Length > 0) AppLog.Add("[!!] presets.json: " + err);
         }
 
         // After Save: the new choice replaces the old one completely - in a session every baseline is restored and the
@@ -289,7 +317,7 @@ namespace Grobyq
             MaskName = _game && Brand.AffinityOpen ? GameRule() : Settings.Get("Mask"),   // the game mask matters (and is logged) only for the game layer
             BgMaskName = GameMask.ManualRule(SafeTopo()),
             DoMask = Brand.AffinityOpen && Settings.GetBool("DoMask"),            // 4.0.3: Affinity closed - its parts are not applied
-            DoThreads = Settings.GetBool("DoThreads"),
+            DoThreads = true,                                       // 4.0.4: the thread rules are the game preset, not a switch
             DoBackground = false,                                   // 4.0.2: the user background list is removed
             BgAffinity = false,
             DoAffRules = Brand.AffinityOpen && Settings.GetBool("DoAffRules"),

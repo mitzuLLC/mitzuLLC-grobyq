@@ -11,9 +11,10 @@ using System.Windows.Shapes;
 namespace Grobyq.Pages
 {
     // Threads. Top: the two optimizer switches (game threads / system threads) with one small status line each - they act
-    // at once and keep their position, the same switches as in the tray menu. Below: the games the game optimizer waits
-    // for and WHAT it may change. v4 manual mode: every part starts off, edits are a draft until Save (Cancel throws the
-    // draft away); Save while an optimizer runs restores every baseline and applies only the saved parts.
+    // at once and keep their position, the same switches as in the tray menu; each runs a reference built into grobyq.
+    // Below: the games the game optimizer waits for and its reference for the picked game (read-only, an editor folded
+    // under it), then the factory reset. Game list and editor changes are a draft until Save (Cancel throws the draft
+    // away); Save while an optimizer runs restores every baseline and applies the saved state afresh.
     public sealed partial class ThreadsPage : PageBase
     {
         // games offered as ready checkboxes: exe -> label
@@ -30,7 +31,6 @@ namespace Grobyq.Pages
 
         private readonly Button _save, _cancel;
         private readonly TextBlock _saveText;
-        private readonly Dictionary<string, CheckBox> _switches = new Dictionary<string, CheckBox>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _draft = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private bool _loading;
 
@@ -43,7 +43,7 @@ namespace Grobyq.Pages
             _gameSw = Ui.Switch(false);
             _gameSw.Click += (s, e) => { OptUi.Game(_gameSw.IsChecked == true); UpdateState(); };
             top.Add(OptimizerRow(L.T("Game threads optimizer"),
-                L.T("When a game below starts, applies what is switched on below and saved. The game closes - everything goes back."),
+                L.T("The built-in reference for the games below: the thread priorities of the game's main thread, job pool and render thread. Applied while the game runs; the game closes - everything goes back."),
                 _gameSw, out _gameDot, out _gameStat, true));
             _sysSw = Ui.Switch(false);
             _sysSw.Click += (s, e) =>
@@ -52,7 +52,7 @@ namespace Grobyq.Pages
                 UpdateState();
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
-                L.T("grobyq's built-in profile while a game runs: thread priorities of system processes, NVIDIA, Steam and Discord; ctfmon and TextInputHost step aside. Priority and boost only, fully reversible."),
+                L.T("The built-in system profile while a game runs: lower thread priorities for system processes, NVIDIA, Steam and Discord (most at the lowest, Idle), ctfmon and TextInputHost entirely at the lowest. Priority boost stays where a thread has to wake on time (audio, input, composition) and is off only for busy background apps. Fully reversible."),
                 _sysSw, out _sysDot, out _sysStat, false));
 
             // ---- games ----
@@ -73,14 +73,14 @@ namespace Grobyq.Pages
             _addGame.Height = 28; _addGame.Padding = new Thickness(12, 0, 12, 0); _addGame.Margin = new Thickness(4, 0, 0, 6);
             _addGame.Click += (s, e) => AddGame();
 
-            // ---- the picked game's preset and thread rules (ThreadsPage.Preset.cs) ----
+            // ---- the picked game's reference (ThreadsPage.Preset.cs) ----
             BuildPreset();
 
-            // ---- reset: this page only (the whole app resets in Settings) ----
+            // ---- factory reset: the whole app, the same as Settings > Reset to factory settings ----
             var rs = Card();
-            var resetBtn = Ui.Btn(L.T("Reset thread settings"), "BtnDangerQuiet");
-            resetBtn.Click += (s, e) => ResetThreads();
-            rs.Add(Ui.Row(L.T("Reset thread settings"), L.T("Both optimizers off, every change back to its Windows default; games, parts and game presets back to the first-run defaults. Affinity and the app settings stay."), resetBtn, false));
+            var resetBtn = Ui.Btn(L.T("Factory reset"), "BtnDangerQuiet");
+            resetBtn.Click += (s, e) => OptUi.FactoryReset(Window.GetWindow(this));   // rebuilds every page, this one too
+            rs.Add(Ui.Row(L.T("Reset to factory settings"), L.T("grobyq as after a fresh install: both optimizers off and every change back, settings, games and the thread reference to the first-run defaults, autostart off. The language, the license and the Affinity backups stay."), resetBtn, false));
 
             // ---- the Save bar, pinned under the page ----
             var bar = new Grid();
@@ -129,14 +129,6 @@ namespace Grobyq.Pages
             Grid.SetColumn(sw, 1);
             g.Children.Add(sw);
             return new Border { Child = g, BorderBrush = Ui.B("Line"), BorderThickness = new Thickness(0, 0, 0, divider ? 1 : 0), SnapsToDevicePixels = true };
-        }
-
-        private Border SwitchRow(string title, string desc, string key, bool divider = true)
-        {
-            var t = Ui.Switch(Settings.GetBool(key));
-            t.Click += (s, e) => { if (!_loading) Draft(key, t.IsChecked == true ? "1" : "0"); };
-            _switches[key] = t;
-            return Ui.Row(title, desc, t, divider);
         }
 
         // ------------------------------------------------------------------ games
@@ -321,7 +313,6 @@ namespace Grobyq.Pages
             _loading = true;
             try
             {
-                foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
                 _labels.Clear();
@@ -347,7 +338,7 @@ namespace Grobyq.Pages
             else if (string.IsNullOrEmpty(live) || !session) Stat(_gameDot, _gameStat, "Warn", L.F("armed - waiting for {0}", targets));
             else
             {
-                string t = L.F("optimizing {0}", live) + "   ·   " + L.F("threads: {0}", o.Eng.GameThreadCount);
+                string t = L.F("optimizing {0}", live) + "   ·   " + RunningRules(o, live) + "   ·   " + L.F("threads: {0}", o.Eng.GameThreadCount);
                 Stat(_gameDot, _gameStat, "Ok", t);
             }
 
@@ -359,6 +350,18 @@ namespace Grobyq.Pages
                 if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // ctfmon / TextInputHost
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
+        }
+
+        // "built-in reference" when every running game runs the reference of this version, else "your rules"
+        private static string RunningRules(Optimizer o, string live)
+        {
+            bool all = true;
+            foreach (var exe in (live ?? "").Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                Preset p;
+                if (o.Eng.Presets == null || !o.Eng.Presets.TryGetValue(exe, out p) || !Store.IsBuiltin(exe, p)) { all = false; break; }
+            }
+            return all ? L.T("built-in reference") : L.T("your rules");
         }
 
         private static void Stat(Ellipse dot, TextBlock text, string brush, string value)
