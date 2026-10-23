@@ -13,12 +13,11 @@ namespace Grobyq
     {
         public string Match = "desc";      // desc = GetThreadDescription | module = start-address module
         public string Pattern = "";        // wildcard, e.g. *MainThrd*  or  engine2.dll
-        public string Prio = "";           // "" keep | Idle | Lowest | BelowNormal | Normal | AboveNormal | Highest
+        public string Prio = "";           // "" keep | Idle | Lowest | BelowNormal | Normal | AboveNormal | Highest | TimeCritical
         public string Ideal = "";          // "" none | auto (spread over free cores) | LP number
         public string Boost = "";          // "" keep | Off | On
         public string Tid = "";            // "" all matches | first | last | N : which matching thread the rule touches (creation order approx by TID)
         public bool Enabled = true;
-        public bool Test;                  // 4.0.5: a priority-test rule (PrioTest) - built per pass, never stored in presets.json
         public ThreadRule Clone() { return (ThreadRule)MemberwiseClone(); }
 
         // 4.0.3: the match kind follows the pattern (Threads > Thread rules has no desc / module choice any more): a file
@@ -377,8 +376,9 @@ namespace Grobyq
             return Json(root);
         }
 
-        // Switches a profile carries. The two gated ones (protected priority, TimeCritical) are never switched on by a
-        // load: they come back in LastImportWants and the page asks the user (per-session acknowledgment).
+        // Switches a profile carries. The gated ones are never switched on by a load: they come back in LastImportWants and
+        // the page asks the user. "AdvancedThreadMode" is retired (4.0.6: Time critical is a normal level) - kept so old
+        // profiles read the same.
         // 4.0.2: the background list, its core pinning and the game mode are removed - old profiles' "DoBackground" /
         // "BgAffinity" / "backgroundList" / "background" / "topN" entries are ignored on import.
         public static readonly string[] FlagKeys = { "DoThreads", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt",
@@ -578,7 +578,7 @@ namespace Grobyq
                             if (r.Pattern.Length == 0) r.Pattern = S(tm, "desc");   // v2 field name
                             string en = S(tm, "enabled", "true").ToLowerInvariant();
                             r.Enabled = en != "false" && en != "0";
-                            // "TimeCritical" is kept as stored: Engine.ThreadPrio runs it as Highest unless Advanced thread mode is on
+                            // "TimeCritical" (15) is a level like the others since 4.0.6 (Engine.TPRIO)
                             p.Threads.Add(r);
                         }
                 }

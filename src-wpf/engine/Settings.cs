@@ -122,7 +122,7 @@ namespace Grobyq
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch
                 { "AllowProtectedPriority", "0" }, // 4.0.4: the one-time yes to the system optimizer (its profile includes protected system processes)
                 { "RestoreOnExit", "1" },
-                { "AdvancedThreadMode", "0" },    // TimeCritical (15) selectable in thread rules (Advanced, warned)
+                { "AdvancedThreadMode", "0" },    // retired in 4.0.6: Time critical (15) is a normal level in the game preset
                 { "LogOpen", "0" },            // the log starts folded: in a normal window the pages keep their full height
             };
         }

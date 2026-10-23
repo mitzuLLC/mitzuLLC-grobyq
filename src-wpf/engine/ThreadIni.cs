@@ -49,7 +49,7 @@ namespace Grobyq
         }
 
         // source value -> grobyq Prio. 15/2 -> Highest ; 300/200/-15 -> Idle ; else Normal.
-        // 15 -> Highest matches grobyq's existing TimeCritical -> Highest coercion.
+        // 15 -> Highest: an imported profile never raises a thread to Time critical (that is a choice made on Threads).
         public static string MapPrio(string value)
         {
             int v;

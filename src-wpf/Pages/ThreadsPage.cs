@@ -12,9 +12,9 @@ namespace Grobyq.Pages
 {
     // Threads. Top: the two optimizer switches (game threads / system threads) with one small status line each - they act
     // at once and keep their position, the same switches as in the tray menu; each runs a reference built into grobyq.
-    // Below: the games the game optimizer waits for and its reference for the picked game (read-only, an editor folded
-    // under it), then the factory reset. Game list and editor changes are a draft until Save (Cancel throws the draft
-    // away); Save while an optimizer runs restores every baseline and applies the saved state afresh.
+    // Below: the games the game optimizer waits for and its reference for the picked game (a row per thread with its
+    // priority, Advanced settings folded), then the factory reset. Game list and reference changes are a draft until Save
+    // (Cancel throws the draft away); Save while an optimizer runs restores every baseline and applies the saved state afresh.
     public sealed partial class ThreadsPage : PageBase
     {
         // games offered as ready checkboxes: exe -> label
@@ -73,9 +73,8 @@ namespace Grobyq.Pages
             _addGame.Height = 28; _addGame.Padding = new Thickness(12, 0, 12, 0); _addGame.Margin = new Thickness(4, 0, 0, 6);
             _addGame.Click += (s, e) => AddGame();
 
-            // ---- the picked game's reference (ThreadsPage.Preset.cs), then the priority test (ThreadsPage.Test.cs) ----
+            // ---- the picked game's reference (ThreadsPage.Preset.cs) ----
             BuildPreset();
-            BuildTest();
 
             // ---- factory reset: the whole app, the same as Settings > Reset to factory settings ----
             var rs = Card();
@@ -322,7 +321,6 @@ namespace Grobyq.Pages
             finally { _loading = false; }
             FillGames();
             FillPick();
-            FillTest();                                     // the test rows name the saved preset's levels
         }
 
         // ------------------------------------------------------------------ state
@@ -352,21 +350,18 @@ namespace Grobyq.Pages
                 if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // ctfmon / TextInputHost
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
-            UpdateTestState();                              // "the game threads optimizer is off" follows the switch
         }
 
-        // "priority test" while a test level runs on a Source 2 game; else "built-in reference" when every running game runs
-        // the reference of this version, else "your rules"
+        // "built-in reference" when every running game runs the reference of this version, else "your rules"
         private static string RunningRules(Optimizer o, string live)
         {
-            bool all = true, test = false;
+            bool all = true;
             foreach (var exe in (live ?? "").Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (PrioTest.ForGame(exe) && PrioTest.Active) test = true;
                 Preset p;
                 if (o.Eng.Presets == null || !o.Eng.Presets.TryGetValue(exe, out p) || !Store.IsBuiltin(exe, p)) all = false;
             }
-            return test ? L.T("priority test") : all ? L.T("built-in reference") : L.T("your rules");
+            return all ? L.T("built-in reference") : L.T("your rules");
         }
 
         private static void Stat(Ellipse dot, TextBlock text, string brush, string value)

@@ -33,8 +33,6 @@ namespace Grobyq
         public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
         public bool Game = true;                // the game threads optimizer is on: targets, affinity rules, the user's background list
         public bool Sys = false;                // the system threads optimizer is on: the built-in profile + its background list
-        public List<ThreadRule> TestRules;      // 4.0.5: the priority test (PrioTest.Rules), in front of the preset's rules for cs2 / dota2
-        public int TestStamp;                   // changes with every test pick: the [AB] lines are written once per pick and thread
     }
 
     public sealed class Engine
@@ -48,13 +46,13 @@ namespace Grobyq
         { {"VeryLow",0},{"Low",1},{"Normal",2},{"High",3},{"Critical",4} };
         public static readonly Dictionary<string, uint> MEM = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
         { {"VeryLow",1},{"Low",2},{"Medium",3},{"BelowNormal",4},{"Normal",5} };
-        // THREAD_PRIORITY_*. TimeCritical (15) is NOT in this map: it is reachable only through ThreadPrio() with
-        // Advanced thread mode on (it usually hurts frame-time: it can starve the scheduler). Off = coerced to Highest.
+        // THREAD_PRIORITY_*. 4.0.6 (owner decision): Time critical (15) is a level like the others - picked per thread in the
+        // game preset (Threads > Reference). It is the top of the normal range: base priority 15 for a thread of a normal-
+        // class process (T1, SetThreadPriority / Scheduling Priorities, MS Learn); real-time levels 16-31 need the Realtime
+        // class, which grobyq never sets. A thread at 15 wins every contest on its core - judge it by 1% low, not avg FPS.
         public static readonly Dictionary<string, int> TPRIO = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        { {"Idle",-15},{"Lowest",-2},{"BelowNormal",-1},{"Normal",0},{"AboveNormal",1},{"Highest",2} };
+        { {"Idle",-15},{"Lowest",-2},{"BelowNormal",-1},{"Normal",0},{"AboveNormal",1},{"Highest",2},{"TimeCritical",15} };
         public const int TimeCriticalValue = 15;
-
-        public static bool AdvancedThreadMode { get { return Settings.GetBool("AdvancedThreadMode"); } }
 
         // A thread priority level as GetThreadPriority returns it, by name for the log ("Highest", "TimeCritical"); a value
         // only a real-time-class process can have stays a number.
@@ -73,14 +71,12 @@ namespace Grobyq
             return v.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        // Thread priority value for a stored key. "TimeCritical" -> 15 only when advanced, otherwise Highest (+2).
-        public static bool ThreadPrio(string key, bool advanced, out int value)
+        // Thread priority value for a stored key; false = "" (keep) or an unknown key - the thread's priority is left alone.
+        public static bool ThreadPrio(string key, out int value)
         {
             value = 0;
             if (string.IsNullOrEmpty(key)) return false;
-            if (TPRIO.TryGetValue(key, out value)) return true;
-            if (string.Equals(key, "TimeCritical", StringComparison.OrdinalIgnoreCase)) { value = advanced ? TimeCriticalValue : TPRIO["Highest"]; return true; }
-            return false;
+            return TPRIO.TryGetValue(key, out value);
         }
 
         // ---- safety envelope (keep these comments: grobyq ships to clients) ----
@@ -557,7 +553,6 @@ namespace Grobyq
             string gate = Gate(target, Op.Process, ProtectedPriorityAllowed);
             if (gate != null) { AdviceOnce(log, "gate:" + target, gate); return log; }
             Native.EnableDebugPrivilege();
-            bool adv = AdvancedThreadMode;
 
             Topo topo = Topo.Live();
             if (topo.Groups > 1)
@@ -742,16 +737,11 @@ namespace Grobyq
                         // threads that start in an anti-cheat module are never touched by a thread rule
                         foreach (var ac in snap.Rows.Select(r => ModuleOf(r.Sym)).Where(IsAntiCheat).Distinct(StringComparer.OrdinalIgnoreCase))
                             AdviceOnce(log, "acmod:" + target + ac, string.Format("[THR] anti-cheat target skipped: {0} (threads in {1})", ac, target));
-                        // 4.0.5: the priority test's rules go first (first match wins): for cs2 / dota2 they take the main thread,
-                        // render thread or job pool from the preset's rule while a test level is picked on Threads
-                        var rules = new List<ThreadRule>();
-                        if (o.TestRules != null && o.TestRules.Count > 0 && PrioTest.ForGame(target)) rules.AddRange(o.TestRules);
-                        if (preset != null) rules.AddRange(preset.Threads);
-                        if (rules.Count > 0)
+                        if (preset != null && preset.Threads.Count > 0)
                         {
-                            foreach (var rule in rules.Where(x => x.Enabled && !string.IsNullOrEmpty(x.Pattern)))
+                            foreach (var rule in preset.Threads.Where(x => x.Enabled && !string.IsNullOrEmpty(x.Pattern)))
                             {
-                                string rname = (rule.Test ? "test:" : "") + (rule.Match == "module" ? "mod:" : "") + rule.Pattern;
+                                string rname = (rule.Match == "module" ? "mod:" : "") + rule.Pattern;
                                 if (IsAntiCheat(rule.Pattern)) { AdviceOnce(log, "acrule:" + target + rname, "[THR] anti-cheat target skipped: " + rule.Pattern); continue; }
                                 var hits = snap.Rows.Where(r => RuleHits(rule, r.Desc, r.Sym) && SafeThread(r)).ToList();
                                 if (hits.Count == 0) { AdviceOnce(log, "nomatch:" + target + rname, string.Format("[TH] rule {0} - no match", rname)); continue; }
@@ -788,16 +778,11 @@ namespace Grobyq
                                                 acts.Add("idealCPU=" + fixedLp + " (fixed)");
                                             }
                                         }
-                                        // the level the thread has before this rule acts: the game's own (or a launch option's)
-                                        // on the first pass, after a restore and on threads created later - A/B evidence in the log
+                                        // the level the thread has before this rule acts - the game's own (or a launch option's) on the
+                                        // first pass: the log reads "prio=was->new", A/B evidence
                                         int was = Native.GetThreadPriority(ht);
-                                        if (rule.Test)
-                                            AdviceOnce(log, "ab:" + o.TestStamp + ":" + tkey2, string.Format("[AB] {0} TID {1}: game {2} -> {3}",
-                                                rule.Pattern, r.Tid, LevelName(was), string.IsNullOrEmpty(rule.Prio) ? "kept (game default)" : rule.Prio + " (priority test)"));
                                         int tp;
-                                        // Time critical (15) runs for a test rule (picked and confirmed on Threads); in a preset only with
-                                        // Advanced thread mode, otherwise it is coerced to Highest
-                                        if (ThreadPrio(rule.Prio, adv || rule.Test, out tp))
+                                        if (ThreadPrio(rule.Prio, out tp))
                                         {
                                             MarkPrio(tb, ht);
                                             if (was != tp)
@@ -1182,7 +1167,7 @@ namespace Grobyq
                 _appliedGame.Add(pid);
                 var acts = new List<string>();
                 int tp;
-                if (ThreadPrio(prio, AdvancedThreadMode, out tp))
+                if (ThreadPrio(prio, out tp))
                 {
                     MarkPrio(tb, ht);
                     bool ok = Native.SetThreadPriority(ht, tp);
@@ -1260,7 +1245,7 @@ namespace Grobyq
 
         private void ApplySet(Dictionary<string, Preset> set, HashSet<string> targets, List<string> log, string tag)
         {
-            bool adv = AdvancedThreadMode, sys = tag == "sys:";
+            bool sys = tag == "sys:";
             foreach (var kv in set)
             {
                 string exe = kv.Key;
@@ -1284,7 +1269,7 @@ namespace Grobyq
                         if (cur < 0 || !_presetTidCount.TryGetValue(pid, out prev) || prev != cur)
                         {
                             int hits;
-                            foreach (var l in ApplyPriorityPreset(pid, preset, adv, sys, out hits)) log.Add(l);
+                            foreach (var l in ApplyPriorityPreset(pid, preset, sys, out hits)) log.Add(l);
                             if (hits > 0 && sys) _sysPids.Add(pid);
                             if (cur >= 0) _presetTidCount[pid] = cur;
                         }
@@ -1317,7 +1302,7 @@ namespace Grobyq
             finally { Native.CloseHandle(hp); }
         }
 
-        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool adv, bool sys, out int setCount)
+        private List<string> ApplyPriorityPreset(int pid, Preset preset, bool sys, out int setCount)
         {
             setCount = 0;
             bool prot = IsProtected(preset.Exe);
@@ -1342,7 +1327,7 @@ namespace Grobyq
                         var tb = ThreadBaseline(key, ht);
                         Debug.Assert(_thrBefore.ContainsKey(key), "thread baseline must be captured before any set");
                         int tp; bool did = false;
-                        if (ThreadPrio(rule.Prio, adv, out tp))
+                        if (ThreadPrio(rule.Prio, out tp))
                         {
                             MarkPrio(tb, ht);
                             if (Native.GetThreadPriority(ht) != tp) { Native.SetThreadPriority(ht, tp); did = true; }

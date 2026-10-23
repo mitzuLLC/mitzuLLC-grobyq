@@ -5,60 +5,82 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
 
 namespace Grobyq.Pages
 {
-    // Threads > Reference: what the game threads optimizer sets for one game (pick it in the list). 4.0.4: the built-in
-    // reference is shown read-only - every thread rule with its caption and the priority it gives, then the process part
-    // in one line - with a chip that says whether this PC runs the reference of this version or its own rules, and
-    // Restore reference. The editor (class, I/O and memory priority, EcoQoS, process boost, the thread rules) is folded
-    // under Edit the reference; its edits go into the page draft like every other setting: Save writes presets.json and
-    // re-applies, Cancel drops them.
+    // Threads > Reference (4.0.6): what the game threads optimizer sets for one game. Header: the game, a pill that says
+    // whether this PC runs the built-in reference of this version or its own rules, Restore reference. Then one row per
+    // thread rule - the thread, its caption and its priority right there in a dropdown, with the base priority each level
+    // gives (Time critical = 15). Below: the process part in one line and Advanced settings, which fold out the process
+    // combos and the full rule editor. Every edit is a draft: Save writes presets.json and re-applies, Cancel drops it.
     public sealed partial class ThreadsPage
     {
         private ComboBox _pick, _cls, _io, _mem, _eco, _pboost;
         private TextBlock _clsDesc, _ioDesc, _memDesc, _procLine, _stateText;
+        private Ellipse _stateDot;
         private StackPanel _rulesHost, _sumHost, _editHost;
         private TextBlock _rulesEmpty;
         private Button _restore, _editBtn;
         private readonly Dictionary<string, Preset> _edit = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);  // draft copies
         private string _cur;
         private bool _pload;
-        private string[] _prioKeys, _prioText;
+
+        private static readonly string[] Levels = { "Idle", "Lowest", "BelowNormal", "Normal", "AboveNormal", "Highest", "TimeCritical" };
 
         private void BuildPreset()
         {
-            BuildPrioChoices();
-
-            // ---- the reference of the picked game, read-only ----
             Title(L.T("Reference"));
             var card = Card();
-            _pick = Combo.New(240);
+
+            // ---- header: the game on the left; the state pill and Restore reference on the right ----
+            var head = new Grid { Margin = new Thickness(0, 10, 0, 10) };
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _pick = Combo.New(260);
+            _pick.HorizontalAlignment = HorizontalAlignment.Left;
             _pick.SelectionChanged += (s, e) => { if (!_pload) LoadPreset(Combo.Val(_pick)); };
-            _stateText = Ui.Text("", 8.75, "Dim", false);
+            head.Children.Add(_pick);
+            var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            _stateDot = new Ellipse { Width = 7, Height = 7, Fill = Ui.B("Faint"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 8, 0) };
+            _stateText = Ui.Text("", 9, "Dim", false);
             _stateText.VerticalAlignment = VerticalAlignment.Center;
-            var chip = new Border { Height = 30, CornerRadius = new CornerRadius(6), Background = Ui.B("Input"), Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(8, 0, 0, 0), Child = _stateText, SnapsToDevicePixels = true };
+            var pillRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            pillRow.Children.Add(_stateDot);
+            pillRow.Children.Add(_stateText);
+            right.Children.Add(new Border { Height = 30, CornerRadius = new CornerRadius(15), Background = Ui.B("Input"), BorderBrush = Ui.B("Edge"), BorderThickness = new Thickness(1), Padding = new Thickness(12, 0, 14, 0), Child = pillRow, SnapsToDevicePixels = true });
             _restore = Ui.Btn(L.T("Restore reference"), "BtnOutline");
             _restore.Height = 30;
             _restore.Margin = new Thickness(8, 0, 0, 0);
             _restore.Click += (s, e) => RestoreReference();
-            var pickRow = new StackPanel { Orientation = Orientation.Horizontal, Height = 30 };
-            pickRow.Children.Add(_pick);
-            pickRow.Children.Add(chip);
-            pickRow.Children.Add(_restore);
-            card.Add(Ui.Row(L.T("Game"), L.T("What the game threads optimizer sets for the picked game. The reference is built into grobyq and comes with every update; Edit the reference changes it on this PC, Restore reference brings the built-in one back."), pickRow));
+            right.Children.Add(_restore);
+            Grid.SetColumn(right, 1);
+            head.Children.Add(right);
+            card.Add(head);
+            card.Add(new Border { Height = 1, Background = Ui.B("Line"), SnapsToDevicePixels = true });
 
-            _sumHost = card.Add(new StackPanel { Margin = new Thickness(0, 10, 0, 0) });
-            _procLine = card.Add(Ui.Text("", 8.75, "Dim"));
-            _procLine.Margin = new Thickness(0, 2, 0, 6);
-            _editBtn = Ui.Btn(L.T("Edit the reference"), "BtnOutline");
+            // ---- the thread rules: one row each ----
+            _sumHost = card.Add(new StackPanel());
+
+            // ---- the process part in one line, Advanced settings on the right ----
+            var foot = new Grid { Margin = new Thickness(0, 10, 0, 10) };
+            foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _procLine = Ui.Text("", 8.75, "Dim");
+            _procLine.VerticalAlignment = VerticalAlignment.Center;
+            _procLine.Margin = new Thickness(0, 0, 16, 0);
+            foot.Children.Add(_procLine);
+            _editBtn = Ui.Btn(L.T("Advanced settings"), "BtnOutline");
             _editBtn.Height = 30;
+            _editBtn.VerticalAlignment = VerticalAlignment.Center;
             _editBtn.Click += (s, e) => ShowEditor(_editHost.Visibility != Visibility.Visible);
-            card.Add(Ui.Strip(42, _editBtn));
+            Grid.SetColumn(_editBtn, 1);
+            foot.Children.Add(_editBtn);
+            card.Add(foot);
 
-            // ---- the editor, folded: process part and thread rules of the picked game ----
+            // ---- Advanced settings, folded: the process part and the full rule editor ----
             _editHost = card.Add(new StackPanel { Visibility = Visibility.Collapsed });
-            _editHost.Children.Add(Ui.Hairline());
+            _editHost.Children.Add(new Border { Height = 1, Background = Ui.B("Line"), SnapsToDevicePixels = true });
             _cls = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("AboveNormal", L.T("Above normal")), new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Idle", L.T("Idle")) });
             _editHost.Children.Add(ComboRow(L.T("Priority class"), Explain.Class("High"), _cls, out _clsDesc));
             _io = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("Normal", L.T("Normal")), new Opt("Low", L.T("Low")), new Opt("VeryLow", L.T("Very low")) });
@@ -71,7 +93,8 @@ namespace Grobyq.Pages
             _pboost = Combo.New(200, new[] { new Opt("Keep", L.T("Keep")), new Opt("Off", L.T("Off")), new Opt("On", L.T("On")) });
             _editHost.Children.Add(ComboRow(L.T("Process priority boost"), Explain.ProcBoost, _pboost, out dummy));
 
-            _cls.SelectionChanged += (s, e) => { _clsDesc.Text = Explain.Class(Combo.Val(_cls)); Edit(p => p.Class = Combo.Val(_cls)); };
+            // the class moves every level's number: the rows and the editor show them again
+            _cls.SelectionChanged += (s, e) => { _clsDesc.Text = Explain.Class(Combo.Val(_cls)); Edit(p => p.Class = Combo.Val(_cls)); if (!_pload) FillRules(); };
             _io.SelectionChanged += (s, e) => { _ioDesc.Text = Explain.Io(Combo.Val(_io)); Edit(p => p.Io = Combo.Val(_io)); };
             _mem.SelectionChanged += (s, e) => { _memDesc.Text = Explain.Mem(Combo.Val(_mem)); Edit(p => p.Mem = Combo.Val(_mem)); };
             _eco.SelectionChanged += (s, e) => Edit(p => p.Eco = Combo.Val(_eco) == "Keep" ? "Keep" : "Off");
@@ -98,22 +121,7 @@ namespace Grobyq.Pages
         private void ShowEditor(bool show)
         {
             _editHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            _editBtn.Content = show ? L.T("Hide the editor") : L.T("Edit the reference");
-        }
-
-        private void BuildPrioChoices()
-        {
-            var k = new List<string> { "", "Idle", "Lowest", "BelowNormal", "Normal", "AboveNormal", "Highest" };
-            var t = new List<string> { L.T("keep"), L.T("Idle"), L.T("Lowest"), L.T("Below normal"), L.T("Normal"), L.T("Above normal"), L.T("High (Highest)") };
-            var o = Optimizer.Instance;
-            bool used = o != null && o.Eng.Presets != null && o.Eng.Presets.Values.Any(p => p.Threads.Any(r => string.Equals(r.Prio, "TimeCritical", StringComparison.OrdinalIgnoreCase)));
-            if (Engine.AdvancedThreadMode || used) { k.Add("TimeCritical"); t.Add(L.T("Time critical (15) - Advanced")); }
-            _prioKeys = k.ToArray(); _prioText = t.ToArray();
-        }
-
-        private IEnumerable<Opt> PrioOpts()
-        {
-            for (int i = 0; i < _prioKeys.Length; i++) yield return new Opt(_prioKeys[i], _prioText[i]);
+            _editBtn.Content = show ? L.T("Hide advanced settings") : L.T("Advanced settings");
         }
 
         private static Border ComboRow(string title, string desc, ComboBox c, out TextBlock d, bool divider = true)
@@ -126,81 +134,36 @@ namespace Grobyq.Pages
             return row;
         }
 
-        // ------------------------------------------------------------------ the read-only reference
-        private void FillSummary()
+        // ------------------------------------------------------------------ levels
+        // The thread priority levels with the base priority each gives under the preset's class. "keep" (the rule leaves the
+        // priority alone) is offered in the rule editor, and in a row only when the rule already has it.
+        private static IEnumerable<Opt> LevelOpts(string current, int classBase, bool withKeep)
         {
-            _sumHost.Children.Clear();
-            if (_cur == null) { _procLine.Text = ""; _stateText.Text = ""; _restore.Visibility = Visibility.Collapsed; return; }
-            var p = Source(_cur);
-            int cb = ClassBase(p.Class);
-            var rules = p.Threads.Where(r => (r.Pattern ?? "").Trim().Length > 0).ToList();
-            if (rules.Count == 0)
+            string cur = current ?? "";
+            if (withKeep || cur.Length == 0) yield return new Opt("", L.T("keep"));
+            foreach (var k in Levels) yield return new Opt(k, LevelText(k, classBase));
+            if (cur.Length > 0 && !Levels.Any(k => string.Equals(k, cur, StringComparison.OrdinalIgnoreCase))) yield return new Opt(cur, cur);   // a stored value grobyq does not know stays visible
+        }
+
+        // "Above normal · 9": the level and its base priority (Idle = 1 and Time critical = 15 whatever the class)
+        private static string LevelText(string key, int classBase)
+        {
+            string name;
+            switch (key)
             {
-                var none = Ui.Text(L.T("No thread rules: only the process part below applies."), 9, "Faint");
-                none.Margin = new Thickness(0, 0, 0, 8);
-                _sumHost.Children.Add(none);
+                case "Idle": name = L.T("Idle"); break;
+                case "Lowest": name = L.T("Lowest"); break;
+                case "BelowNormal": name = L.T("Below normal"); break;
+                case "Normal": name = L.T("Normal"); break;
+                case "AboveNormal": name = L.T("Above normal"); break;
+                case "Highest": name = L.T("High (Highest)"); break;
+                case "TimeCritical": name = L.T("Time critical"); break;
+                default: return key;
             }
-            foreach (var r in rules) _sumHost.Children.Add(SumRow(r, cb));
-            _procLine.Text = L.F("Process: priority class {0}  ·  I/O {1}  ·  memory {2}  ·  EcoQoS {3}  ·  priority boost {4}",
-                ComboText(_cls, p.Class), ComboText(_io, p.Io), ComboText(_mem, p.Mem),
-                ComboText(_eco, string.Equals(p.Eco, "Keep", StringComparison.OrdinalIgnoreCase) ? "Keep" : "Off"), ComboText(_pboost, string.IsNullOrEmpty(p.Boost) ? "Keep" : p.Boost));
-
-            bool has = Store.HasBuiltin(_cur), same = has && Store.IsBuiltin(_cur, p);
-            _stateText.Text = same ? L.T("built-in reference") : has ? L.T("your rules") : L.T("no built-in reference");
-            _stateText.Foreground = Ui.B(same ? "Ok" : has ? "Warn" : "Dim");
-            _restore.Visibility = has && !same ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        // one rule: the thread (pattern without the outer wildcards) and its caption on the left, what it sets on the right
-        private FrameworkElement SumRow(ThreadRule r, int classBase)
-        {
-            var g = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var left = new StackPanel();
-            left.Children.Add(Ui.Semi((r.Pattern ?? "").Trim().Trim('*'), 9.5, r.Enabled ? "Fg" : "Faint"));
-            string note = ThreadNotes.For(r.Pattern);
-            if (note.Length > 0)
-            {
-                var n = Ui.Text(note, 8.25, "Faint");
-                n.Margin = new Thickness(0, 1, 0, 0);
-                left.Children.Add(n);
-            }
-            g.Children.Add(left);
-            var right = Ui.Text(r.Enabled ? RuleText(r, classBase) : L.T("off"), 9, r.Enabled ? "Dim" : "Faint", false);
-            right.Margin = new Thickness(24, 1, 0, 0);
-            right.VerticalAlignment = VerticalAlignment.Top;
-            Grid.SetColumn(right, 1);
-            g.Children.Add(right);
-            return g;
-        }
-
-        // "Above normal · 9", then the boost / Ideal CPU / thread pick when the rule sets one
-        private string RuleText(ThreadRule r, int classBase)
-        {
-            string prio = r.Prio ?? "";
-            int i = Array.FindIndex(_prioKeys, x => string.Equals(x, prio, StringComparison.OrdinalIgnoreCase));
-            var parts = new List<string> { i >= 0 ? _prioText[i] : prio };
-            int v;
-            if (PrioValue(prio, classBase, out v)) parts[0] += " · " + v.ToString(CultureInfo.InvariantCulture);
-            if (string.Equals(r.Boost, "Off", StringComparison.OrdinalIgnoreCase)) parts.Add(L.T("boost off"));
-            else if (string.Equals(r.Boost, "On", StringComparison.OrdinalIgnoreCase)) parts.Add(L.T("boost on"));
-            int lp;
-            if (string.Equals(r.Ideal, "auto", StringComparison.OrdinalIgnoreCase)) parts.Add("Ideal CPU auto");
-            else if (int.TryParse(r.Ideal, NumberStyles.Integer, CultureInfo.InvariantCulture, out lp)) parts.Add("Ideal CPU " + lp.ToString(CultureInfo.InvariantCulture));
-            if (!string.IsNullOrEmpty(r.Tid)) parts.Add("tid " + r.Tid);
-            return string.Join("   ·   ", parts);
-        }
-
-        // The thread's base priority a rule gives: the class base plus the THREAD_PRIORITY offset (Idle = 1, Time critical
-        // = 15, both whatever the class). false = keep (the rule leaves the priority alone).
-        private static bool PrioValue(string key, int classBase, out int v)
-        {
-            v = 0;
             int off;
-            if (!Engine.ThreadPrio(key, Engine.AdvancedThreadMode, out off)) return false;
-            v = off == -15 ? 1 : off == Engine.TimeCriticalValue ? 15 : Math.Max(1, Math.Min(15, classBase + off));
-            return true;
+            if (!Engine.ThreadPrio(key, out off)) return name;
+            int v = off == -15 ? 1 : off == Engine.TimeCriticalValue ? 15 : Math.Max(1, Math.Min(15, classBase + off));
+            return name + " · " + v.ToString(CultureInfo.InvariantCulture);
         }
 
         private static int ClassBase(string cls)
@@ -225,6 +188,69 @@ namespace Grobyq.Pages
             return value ?? "";
         }
 
+        // ------------------------------------------------------------------ the rows
+        // One row per enabled rule with a pattern; a disabled rule shows only in Advanced settings.
+        private void FillSummary()
+        {
+            _sumHost.Children.Clear();
+            if (_cur == null) { _procLine.Text = ""; _stateText.Text = ""; _stateDot.Fill = Ui.B("Faint"); _restore.Visibility = Visibility.Collapsed; return; }
+            var p = Source(_cur);
+            int cb = ClassBase(p.Class);
+            var idx = new List<int>();
+            for (int i = 0; i < p.Threads.Count; i++)
+                if (p.Threads[i].Enabled && (p.Threads[i].Pattern ?? "").Trim().Length > 0) idx.Add(i);
+            bool was = _pload;
+            _pload = true;
+            try
+            {
+                if (idx.Count == 0)
+                {
+                    var none = Ui.Text(L.T("No thread rules: only the process part below applies."), 9, "Faint");
+                    none.Margin = new Thickness(0, 12, 0, 4);
+                    _sumHost.Children.Add(none);
+                }
+                for (int k = 0; k < idx.Count; k++) _sumHost.Children.Add(RuleLine(p.Threads[idx[k]], idx[k], cb, k < idx.Count - 1));
+            }
+            finally { _pload = was; }
+            UpdateRefState(p);
+        }
+
+        // the thread and its caption on the left, its priority on the right (a draft edit, Save applies it)
+        private Border RuleLine(ThreadRule r, int index, int classBase, bool divider)
+        {
+            var c = Combo.New(240, LevelOpts(r.Prio, classBase, false));
+            Combo.Select(c, r.Prio ?? "");
+            c.SelectionChanged += (s, e) =>
+            {
+                if (_pload) return;
+                string v = Combo.Val(c);
+                Edit(p => { if (index < p.Threads.Count) p.Threads[index].Prio = v; }, false);
+            };
+            string pat = (r.Pattern ?? "").Trim();
+            string desc = ThreadNotes.For(pat);
+            if (desc.Length == 0) desc = string.Equals(r.Match, "module", StringComparison.OrdinalIgnoreCase) ? L.F("Threads that start in {0}.", pat) : L.F("Threads named {0}.", pat);
+            var extra = new List<string>();
+            if (string.Equals(r.Boost, "Off", StringComparison.OrdinalIgnoreCase)) extra.Add(L.T("boost off"));
+            else if (string.Equals(r.Boost, "On", StringComparison.OrdinalIgnoreCase)) extra.Add(L.T("boost on"));
+            if (!string.IsNullOrEmpty(r.Ideal)) extra.Add("Ideal CPU " + r.Ideal);
+            if (!string.IsNullOrEmpty(r.Tid)) extra.Add("tid " + r.Tid);
+            if (extra.Count > 0) desc += "  ·  " + string.Join("  ·  ", extra);
+            return Ui.Row(pat.Trim('*'), desc, c, divider);
+        }
+
+        // the pill, Restore reference and the process line
+        private void UpdateRefState(Preset p)
+        {
+            _procLine.Text = L.F("Process: priority class {0}  ·  I/O {1}  ·  memory {2}  ·  EcoQoS {3}  ·  priority boost {4}",
+                ComboText(_cls, p.Class), ComboText(_io, p.Io), ComboText(_mem, p.Mem),
+                ComboText(_eco, string.Equals(p.Eco, "Keep", StringComparison.OrdinalIgnoreCase) ? "Keep" : "Off"), ComboText(_pboost, string.IsNullOrEmpty(p.Boost) ? "Keep" : p.Boost));
+            bool has = Store.HasBuiltin(_cur), same = has && Store.IsBuiltin(_cur, p);
+            _stateText.Text = same ? L.T("built-in reference") : has ? L.T("your rules") : L.T("no built-in reference");
+            _stateText.Foreground = Ui.B(same ? "Fg" : "Dim");
+            _stateDot.Fill = Ui.B(same ? "Ok" : has ? "Warn" : "Faint");
+            _restore.Visibility = has && !same ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         // Restore reference: the built-in preset replaces this game's saved one at once (asked first) and a running session
         // re-applies; other unsaved edits on the page stay a draft.
         private void RestoreReference()
@@ -243,7 +269,6 @@ namespace Grobyq.Pages
                 o.ApplyNow();                                   // in a session: restore, then apply the reference afresh
             }
             LoadPreset(exe);
-            FillTest();                                         // the test rows name the preset's levels
             UpdateSaveBar(L.T("Reference restored."));
         }
 
@@ -310,13 +335,20 @@ namespace Grobyq.Pages
         }
 
         // ------------------------------------------------------------------ draft
-        private void Edit(Action<Preset> change)
+        // rows = rebuild the rule rows (an edit made in Advanced settings); a priority picked in a row leaves the rows as
+        // they are and refreshes the open editor instead
+        private void Edit(Action<Preset> change, bool rows = true)
         {
             if (_pload || _loading || _cur == null) return;
             Preset p;
             if (!_edit.TryGetValue(_cur, out p)) { p = Source(_cur).Clone(); p.Exe = _cur; _edit[_cur] = p; }
             change(p);
-            FillSummary();
+            if (rows) FillSummary();
+            else
+            {
+                UpdateRefState(p);
+                if (_editHost.Visibility == Visibility.Visible) FillRules();
+            }
             UpdateSaveBar(null);
         }
 
@@ -362,8 +394,8 @@ namespace Grobyq.Pages
             AppLog.Add(err.Length == 0 ? "[PS] preset saved: " + string.Join(", ", copies.Keys.Select(k => k + (Store.IsBuiltin(k, copies[k]) ? " (built-in reference)" : Store.HasBuiltin(k) ? " (your rules)" : ""))) : "[!!] presets.json: " + err);
         }
 
-        // ------------------------------------------------------------------ rules editor
-        private const double CMatch = 116, CPrio = 150, CIdeal = 92, CBoost = 92, COn = 36, CAct = 92;
+        // ------------------------------------------------------------------ the rule editor (Advanced settings)
+        private const double CMatch = 116, CPrio = 210, CIdeal = 92, CBoost = 92, COn = 36, CAct = 92;
 
         private Grid RuleGrid()
         {
@@ -406,13 +438,15 @@ namespace Grobyq.Pages
             _rulesHost.Children.Clear();
             if (_cur == null) { _rulesEmpty.Visibility = Visibility.Visible; return; }
             var p = Source(_cur);
+            int cb = ClassBase(p.Class);
+            bool was = _pload;
             _pload = true;
-            try { for (int i = 0; i < p.Threads.Count; i++) _rulesHost.Children.Add(RuleRow(p.Threads[i], i, p.Threads.Count)); }
-            finally { _pload = false; }
+            try { for (int i = 0; i < p.Threads.Count; i++) _rulesHost.Children.Add(RuleRow(p.Threads[i], i, p.Threads.Count, cb)); }
+            finally { _pload = was; }
             _rulesEmpty.Visibility = p.Threads.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private FrameworkElement RuleRow(ThreadRule r, int i, int count)
+        private FrameworkElement RuleRow(ThreadRule r, int i, int count, int classBase)
         {
             var g = RuleGrid();
             g.Margin = new Thickness(0, 0, 0, 6);
@@ -448,7 +482,7 @@ namespace Grobyq.Pages
             };
             Put(g, patCol, 2);
 
-            var prio = Combo.New(CPrio, PrioOpts());
+            var prio = Combo.New(CPrio, LevelOpts(r.Prio, classBase, true));
             Combo.Select(prio, r.Prio ?? "");
             prio.SelectionChanged += (s, e) => Edit(p => p.Threads[i].Prio = Combo.Val(prio));
             Put(g, prio, 3);

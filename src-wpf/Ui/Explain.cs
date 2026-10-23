@@ -98,7 +98,7 @@ namespace Grobyq
         {
             get
             {
-                return L.T("Thread priority = process class base + thread offset. With class High (base 13): Normal 13, Above normal 14, High (Highest) 15 - the top of the non-realtime range. TimeCritical would also land on 15, so grobyq stops at High. A thread at 15 wins every contest on its core: give it to 1-2 threads (main / render) and judge by frame-time, not average FPS.");
+                return L.T("Thread priority = process class base + thread level. With the class Normal (base 8): Normal 8, Above normal 9, High (Highest) 10, Time critical 15 - the top of the normal range; real-time levels (16-31) exist only in the Realtime class, which grobyq never sets. A thread at 15 wins every contest on its core: give it to one thread and judge by frame-time (1% low), not average FPS.");
             }
         }
 
