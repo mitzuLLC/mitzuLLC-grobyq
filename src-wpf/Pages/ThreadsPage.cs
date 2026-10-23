@@ -293,10 +293,11 @@ namespace Grobyq.Pages
             if (parts.Count > 0) AppLog.Add("[i] saved: " + string.Join(", ", parts));
             SavePresets();
             var o = Optimizer.Instance;
-            bool active = o != null && o.Active;
-            if (o != null) o.Reapply();
+            if (o != null) o.Reapply();                     // a running game session: every baseline back, the saved state applied afresh
             Resync();
-            UpdateSaveBar(active ? L.T("Saved - applied now.") : L.T("Saved. Turn the game threads optimizer on to apply."));
+            // say what really happened: applied to a running game, waiting for the game, or nothing on
+            bool game = o != null && o.GameOn, live = game && o.InSession;
+            UpdateSaveBar(live ? L.T("Saved - applied now.") : game ? L.T("Saved - applies when the game starts.") : L.T("Saved. Turn the game threads optimizer on to apply."));
         }
 
         private void CancelDraft()

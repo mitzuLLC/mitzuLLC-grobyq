@@ -7,7 +7,7 @@
 #ifndef OutDir
   #define OutDir "dist"
 #endif
-#define AppVer "4.0.6"
+#define AppVer "4.0.7"
 
 [Setup]
 AppName=grobyq

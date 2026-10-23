@@ -9,17 +9,17 @@ using System.Windows.Shapes;
 
 namespace Grobyq.Pages
 {
-    // Threads > Reference (4.0.6): what the game threads optimizer sets for one game. Header: the game, a pill that says
-    // whether this PC runs the built-in reference of this version or its own rules, Restore reference. Then one row per
-    // thread rule - the thread, its caption and its priority right there in a dropdown, with the base priority each level
-    // gives (Time critical = 15). Below: the process part in one line and Advanced settings, which fold out the process
-    // combos and the full rule editor. Every edit is a draft: Save writes presets.json and re-applies, Cancel drops it.
+    // Threads > Reference (4.0.7): what the game threads optimizer sets for one game, each setting in one place. Header: the
+    // game, a pill that says whether this PC runs the built-in reference of this version or its own rules, Restore
+    // reference. Then the process settings (priority class, I/O and memory priority, EcoQoS, process boost). The thread
+    // rules live in Advanced settings only (when it is folded, one line says what they set). Every edit is a draft: Save
+    // writes presets.json and re-applies - at once in a running game session.
     public sealed partial class ThreadsPage
     {
         private ComboBox _pick, _cls, _io, _mem, _eco, _pboost;
-        private TextBlock _clsDesc, _ioDesc, _memDesc, _procLine, _stateText;
+        private TextBlock _clsDesc, _ioDesc, _memDesc, _threadLine, _stateText;
         private Ellipse _stateDot;
-        private StackPanel _rulesHost, _sumHost, _editHost;
+        private StackPanel _rulesHost, _editHost;
         private TextBlock _rulesEmpty;
         private Button _restore, _editBtn;
         private readonly Dictionary<string, Preset> _edit = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);  // draft copies
@@ -59,17 +59,34 @@ namespace Grobyq.Pages
             card.Add(head);
             card.Add(new Border { Height = 1, Background = Ui.B("Line"), SnapsToDevicePixels = true });
 
-            // ---- the thread rules: one row each ----
-            _sumHost = card.Add(new StackPanel());
+            // ---- the process settings ----
+            _cls = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("AboveNormal", L.T("Above normal")), new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Idle", L.T("Idle")) });
+            card.Add(ComboRow(L.T("Priority class"), Explain.Class("High"), _cls, out _clsDesc));
+            _io = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("Normal", L.T("Normal")), new Opt("Low", L.T("Low")), new Opt("VeryLow", L.T("Very low")) });
+            card.Add(ComboRow(L.T("I/O priority"), Explain.Io("Normal"), _io, out _ioDesc));
+            _mem = Combo.New(200, new[] { new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Medium", L.T("Medium")), new Opt("Low", L.T("Low")), new Opt("VeryLow", L.T("Very low")) });
+            card.Add(ComboRow(L.T("Memory priority"), Explain.Mem("Normal"), _mem, out _memDesc));
+            TextBlock dummy;
+            _eco = Combo.New(200, new[] { new Opt("Off", L.T("Off (HighQoS)")), new Opt("Keep", L.T("Keep Windows default")) });
+            card.Add(ComboRow("EcoQoS", Explain.Eco, _eco, out dummy));
+            _pboost = Combo.New(200, new[] { new Opt("Keep", L.T("Keep")), new Opt("Off", L.T("Off")), new Opt("On", L.T("On")) });
+            card.Add(ComboRow(L.T("Process priority boost"), Explain.ProcBoost, _pboost, out dummy));
 
-            // ---- the process part in one line, Advanced settings on the right ----
+            // the class moves every thread level's number: the rule editor shows them again
+            _cls.SelectionChanged += (s, e) => { _clsDesc.Text = Explain.Class(Combo.Val(_cls)); Edit(p => p.Class = Combo.Val(_cls)); if (!_pload) FillRules(); };
+            _io.SelectionChanged += (s, e) => { _ioDesc.Text = Explain.Io(Combo.Val(_io)); Edit(p => p.Io = Combo.Val(_io)); };
+            _mem.SelectionChanged += (s, e) => { _memDesc.Text = Explain.Mem(Combo.Val(_mem)); Edit(p => p.Mem = Combo.Val(_mem)); };
+            _eco.SelectionChanged += (s, e) => Edit(p => p.Eco = Combo.Val(_eco) == "Keep" ? "Keep" : "Off");
+            _pboost.SelectionChanged += (s, e) => Edit(p => p.Boost = Combo.Val(_pboost));
+
+            // ---- thread rules: one line while folded, Advanced settings on the right ----
             var foot = new Grid { Margin = new Thickness(0, 10, 0, 10) };
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            _procLine = Ui.Text("", 8.75, "Dim");
-            _procLine.VerticalAlignment = VerticalAlignment.Center;
-            _procLine.Margin = new Thickness(0, 0, 16, 0);
-            foot.Children.Add(_procLine);
+            _threadLine = Ui.Text("", 8.75, "Dim");
+            _threadLine.VerticalAlignment = VerticalAlignment.Center;
+            _threadLine.Margin = new Thickness(0, 0, 16, 0);
+            foot.Children.Add(_threadLine);
             _editBtn = Ui.Btn(L.T("Advanced settings"), "BtnOutline");
             _editBtn.Height = 30;
             _editBtn.VerticalAlignment = VerticalAlignment.Center;
@@ -78,28 +95,9 @@ namespace Grobyq.Pages
             foot.Children.Add(_editBtn);
             card.Add(foot);
 
-            // ---- Advanced settings, folded: the process part and the full rule editor ----
+            // ---- Advanced settings, folded: the thread rules of the picked game ----
             _editHost = card.Add(new StackPanel { Visibility = Visibility.Collapsed });
             _editHost.Children.Add(new Border { Height = 1, Background = Ui.B("Line"), SnapsToDevicePixels = true });
-            _cls = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("AboveNormal", L.T("Above normal")), new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Idle", L.T("Idle")) });
-            _editHost.Children.Add(ComboRow(L.T("Priority class"), Explain.Class("High"), _cls, out _clsDesc));
-            _io = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("Normal", L.T("Normal")), new Opt("Low", L.T("Low")), new Opt("VeryLow", L.T("Very low")) });
-            _editHost.Children.Add(ComboRow(L.T("I/O priority"), Explain.Io("Normal"), _io, out _ioDesc));
-            _mem = Combo.New(200, new[] { new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Medium", L.T("Medium")), new Opt("Low", L.T("Low")), new Opt("VeryLow", L.T("Very low")) });
-            _editHost.Children.Add(ComboRow(L.T("Memory priority"), Explain.Mem("Normal"), _mem, out _memDesc));
-            TextBlock dummy;
-            _eco = Combo.New(200, new[] { new Opt("Off", L.T("Off (HighQoS)")), new Opt("Keep", L.T("Keep Windows default")) });
-            _editHost.Children.Add(ComboRow("EcoQoS", Explain.Eco, _eco, out dummy));
-            _pboost = Combo.New(200, new[] { new Opt("Keep", L.T("Keep")), new Opt("Off", L.T("Off")), new Opt("On", L.T("On")) });
-            _editHost.Children.Add(ComboRow(L.T("Process priority boost"), Explain.ProcBoost, _pboost, out dummy));
-
-            // the class moves every level's number: the rows and the editor show them again
-            _cls.SelectionChanged += (s, e) => { _clsDesc.Text = Explain.Class(Combo.Val(_cls)); Edit(p => p.Class = Combo.Val(_cls)); if (!_pload) FillRules(); };
-            _io.SelectionChanged += (s, e) => { _ioDesc.Text = Explain.Io(Combo.Val(_io)); Edit(p => p.Io = Combo.Val(_io)); };
-            _mem.SelectionChanged += (s, e) => { _memDesc.Text = Explain.Mem(Combo.Val(_mem)); Edit(p => p.Mem = Combo.Val(_mem)); };
-            _eco.SelectionChanged += (s, e) => Edit(p => p.Eco = Combo.Val(_eco) == "Keep" ? "Keep" : "Off");
-            _pboost.SelectionChanged += (s, e) => Edit(p => p.Boost = Combo.Val(_pboost));
-
             var rdesc = Ui.Text(L.T("Thread rules, top to bottom: the first matching rule wins for a thread. A pattern with a file name (.dll, .exe) matches the module the thread starts in, any other pattern matches the thread description (GetThreadDescription). Known threads get a caption under the pattern."), 8.75, "Dim");
             rdesc.Margin = new Thickness(0, 12, 0, 10);
             _editHost.Children.Add(rdesc);
@@ -118,10 +116,12 @@ namespace Grobyq.Pages
             _editHost.Children.Add(strip);
         }
 
+        // the folded line names the rules; open, the editor itself shows them (no list twice)
         private void ShowEditor(bool show)
         {
             _editHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             _editBtn.Content = show ? L.T("Hide advanced settings") : L.T("Advanced settings");
+            _threadLine.Visibility = show ? Visibility.Hidden : Visibility.Visible;
         }
 
         private static Border ComboRow(string title, string desc, ComboBox c, out TextBlock d, bool divider = true)
@@ -135,8 +135,8 @@ namespace Grobyq.Pages
         }
 
         // ------------------------------------------------------------------ levels
-        // The thread priority levels with the base priority each gives under the preset's class. "keep" (the rule leaves the
-        // priority alone) is offered in the rule editor, and in a row only when the rule already has it.
+        // The thread priority levels with the base priority each gives under the preset's class; "keep" = the rule leaves the
+        // priority alone (a rule may set only the boost or the Ideal CPU).
         private static IEnumerable<Opt> LevelOpts(string current, int classBase, bool withKeep)
         {
             string cur = current ?? "";
@@ -178,72 +178,25 @@ namespace Grobyq.Pages
             }
         }
 
-        private static string ComboText(ComboBox c, string value)
+        // ------------------------------------------------------------------ state
+        // The pill, Restore reference and the folded thread line ("Thread rules: MainThrd 15 · GlobPool 9 ...": each enabled
+        // rule with the base priority it gives).
+        private void UpdateRefState()
         {
-            foreach (var it in c.Items)
-            {
-                var o = it as Opt;
-                if (o != null && string.Equals(o.Value, value ?? "", StringComparison.OrdinalIgnoreCase)) return o.Text;
-            }
-            return value ?? "";
-        }
-
-        // ------------------------------------------------------------------ the rows
-        // One row per enabled rule with a pattern; a disabled rule shows only in Advanced settings.
-        private void FillSummary()
-        {
-            _sumHost.Children.Clear();
-            if (_cur == null) { _procLine.Text = ""; _stateText.Text = ""; _stateDot.Fill = Ui.B("Faint"); _restore.Visibility = Visibility.Collapsed; return; }
+            if (_cur == null) { _threadLine.Text = ""; _stateText.Text = ""; _stateDot.Fill = Ui.B("Faint"); _restore.Visibility = Visibility.Collapsed; return; }
             var p = Source(_cur);
             int cb = ClassBase(p.Class);
-            var idx = new List<int>();
-            for (int i = 0; i < p.Threads.Count; i++)
-                if (p.Threads[i].Enabled && (p.Threads[i].Pattern ?? "").Trim().Length > 0) idx.Add(i);
-            bool was = _pload;
-            _pload = true;
-            try
+            var parts = new List<string>();
+            foreach (var r in p.Threads)
             {
-                if (idx.Count == 0)
-                {
-                    var none = Ui.Text(L.T("No thread rules: only the process part below applies."), 9, "Faint");
-                    none.Margin = new Thickness(0, 12, 0, 4);
-                    _sumHost.Children.Add(none);
-                }
-                for (int k = 0; k < idx.Count; k++) _sumHost.Children.Add(RuleLine(p.Threads[idx[k]], idx[k], cb, k < idx.Count - 1));
+                string pat = (r.Pattern ?? "").Trim();
+                if (!r.Enabled || pat.Length == 0) continue;
+                int off;
+                string lvl = !Engine.ThreadPrio(r.Prio, out off) ? L.T("keep")
+                           : (off == -15 ? 1 : off == Engine.TimeCriticalValue ? 15 : Math.Max(1, Math.Min(15, cb + off))).ToString(CultureInfo.InvariantCulture);
+                parts.Add(pat.Trim('*') + " " + lvl);
             }
-            finally { _pload = was; }
-            UpdateRefState(p);
-        }
-
-        // the thread and its caption on the left, its priority on the right (a draft edit, Save applies it)
-        private Border RuleLine(ThreadRule r, int index, int classBase, bool divider)
-        {
-            var c = Combo.New(240, LevelOpts(r.Prio, classBase, false));
-            Combo.Select(c, r.Prio ?? "");
-            c.SelectionChanged += (s, e) =>
-            {
-                if (_pload) return;
-                string v = Combo.Val(c);
-                Edit(p => { if (index < p.Threads.Count) p.Threads[index].Prio = v; }, false);
-            };
-            string pat = (r.Pattern ?? "").Trim();
-            string desc = ThreadNotes.For(pat);
-            if (desc.Length == 0) desc = string.Equals(r.Match, "module", StringComparison.OrdinalIgnoreCase) ? L.F("Threads that start in {0}.", pat) : L.F("Threads named {0}.", pat);
-            var extra = new List<string>();
-            if (string.Equals(r.Boost, "Off", StringComparison.OrdinalIgnoreCase)) extra.Add(L.T("boost off"));
-            else if (string.Equals(r.Boost, "On", StringComparison.OrdinalIgnoreCase)) extra.Add(L.T("boost on"));
-            if (!string.IsNullOrEmpty(r.Ideal)) extra.Add("Ideal CPU " + r.Ideal);
-            if (!string.IsNullOrEmpty(r.Tid)) extra.Add("tid " + r.Tid);
-            if (extra.Count > 0) desc += "  ·  " + string.Join("  ·  ", extra);
-            return Ui.Row(pat.Trim('*'), desc, c, divider);
-        }
-
-        // the pill, Restore reference and the process line
-        private void UpdateRefState(Preset p)
-        {
-            _procLine.Text = L.F("Process: priority class {0}  ·  I/O {1}  ·  memory {2}  ·  EcoQoS {3}  ·  priority boost {4}",
-                ComboText(_cls, p.Class), ComboText(_io, p.Io), ComboText(_mem, p.Mem),
-                ComboText(_eco, string.Equals(p.Eco, "Keep", StringComparison.OrdinalIgnoreCase) ? "Keep" : "Off"), ComboText(_pboost, string.IsNullOrEmpty(p.Boost) ? "Keep" : p.Boost));
+            _threadLine.Text = parts.Count == 0 ? L.T("No thread rules: only the process settings above apply.") : L.F("Thread rules: {0}", string.Join("  ·  ", parts));
             bool has = Store.HasBuiltin(_cur), same = has && Store.IsBuiltin(_cur, p);
             _stateText.Text = same ? L.T("built-in reference") : has ? L.T("your rules") : L.T("no built-in reference");
             _stateText.Foreground = Ui.B(same ? "Fg" : "Dim");
@@ -319,7 +272,7 @@ namespace Grobyq.Pages
             _cur = string.IsNullOrEmpty(exe) ? null : exe;
             bool on = _cur != null;
             foreach (var c in new Control[] { _cls, _io, _mem, _eco, _pboost, _editBtn }) c.IsEnabled = on;
-            if (!on) { _rulesHost.Children.Clear(); _rulesEmpty.Visibility = Visibility.Visible; FillSummary(); return; }
+            if (!on) { _rulesHost.Children.Clear(); _rulesEmpty.Visibility = Visibility.Visible; UpdateRefState(); return; }
             var p = Source(_cur);
             _pload = true;
             try
@@ -331,24 +284,18 @@ namespace Grobyq.Pages
             }
             finally { _pload = false; }
             FillRules();
-            FillSummary();
+            UpdateRefState();
         }
 
         // ------------------------------------------------------------------ draft
-        // rows = rebuild the rule rows (an edit made in Advanced settings); a priority picked in a row leaves the rows as
-        // they are and refreshes the open editor instead
-        private void Edit(Action<Preset> change, bool rows = true)
+        // Every control writes into the draft copy of the picked game's preset; the pill and the folded line follow at once.
+        private void Edit(Action<Preset> change)
         {
             if (_pload || _loading || _cur == null) return;
             Preset p;
             if (!_edit.TryGetValue(_cur, out p)) { p = Source(_cur).Clone(); p.Exe = _cur; _edit[_cur] = p; }
             change(p);
-            if (rows) FillSummary();
-            else
-            {
-                UpdateRefState(p);
-                if (_editHost.Visibility == Visibility.Visible) FillRules();
-            }
+            UpdateRefState();
             UpdateSaveBar(null);
         }
 

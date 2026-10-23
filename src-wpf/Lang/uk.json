@@ -1342,8 +1342,6 @@
  "Factory reset": "Скинути до заводських",
  "Interrupt settings and ReservedCpuSets changed on the Affinity page are Windows settings: they stay until you restore them on that page.": "Налаштування переривань і ReservedCpuSets, змінені на сторінці «Прив'язка», — це налаштування Windows: вони залишаються, доки ви не відновите їх на тій сторінці.",
  "Job pool (GlobPool/0..N): the main thread splits each frame's work over these workers and waits for all of them.": "Пул завдань (GlobPool/0..N): головний потік ділить роботу кожного кадру між цими потоками й чекає на всі.",
- "No thread rules: only the process part below applies.": "Правил потоків немає: застосовується лише частина процесу нижче.",
- "Process: priority class {0}  ·  I/O {1}  ·  memory {2}  ·  EcoQoS {3}  ·  priority boost {4}": "Процес: клас пріоритету {0}  ·  введення-виведення {1}  ·  пам'ять {2}  ·  EcoQoS {3}  ·  підвищення пріоритету {4}",
  "Reference": "Еталон",
  "Reference restored.": "Еталон відновлено.",
  "Reset grobyq to its factory settings? Both optimizers turn off and every change goes back; the settings, games and thread reference return to the first-run defaults, and autostart is removed. The language and the license stay.": "Скинути grobyq до заводських налаштувань? Обидва оптимізатори вимкнуться й усі зміни повернуться; налаштування, ігри та еталон потоків повернуться до значень першого запуску, автозапуск буде видалено. Мова та ліцензія залишаться.",
@@ -1355,8 +1353,6 @@
  "The system threads optimizer lowers the thread priorities of system processes too (dwm, svchost, audiodg, csrss, winlogon, explorer) while a game runs. Priority and boost only: nothing is frozen or killed, and everything goes back when the game closes.\n\nTurn it on?": "Оптимізатор системних потоків, поки триває гра, знижує пріоритети потоків і в системних процесах (dwm, svchost, audiodg, csrss, winlogon, explorer). Лише пріоритет і boost: нічого не заморожується й не завершується, усе повертається, коли гра закривається.\n\nУвімкнути?",
  "Thread rules, top to bottom: the first matching rule wins for a thread. A pattern with a file name (.dll, .exe) matches the module the thread starts in, any other pattern matches the thread description (GetThreadDescription). Known threads get a caption under the pattern.": "Правила потоків, згори донизу: для потоку спрацьовує перше відповідне правило. Шаблон з іменем файлу (.dll, .exe) порівнюється з модулем, у якому потік стартує, будь-який інший — з описом потоку (GetThreadDescription). Відомі потоки мають підпис під шаблоном.",
  "Turn on": "Увімкнути",
- "boost off": "буст вимк",
- "boost on": "буст увімк",
  "built-in reference": "вбудований еталон",
  "grobyq as after a fresh install: both optimizers off and every change back, settings, games and the thread reference to the first-run defaults, autostart off. The language, the license and the Affinity backups stay.": "grobyq як після чистого встановлення: обидва оптимізатори вимкнено, усі зміни повернуто, налаштування, ігри та еталон потоків — як під час першого запуску, автозапуск вимкнено. Мова, ліцензія та резервні копії «Прив'язки» залишаються.",
  "grobyq is back to its factory settings.": "grobyq повернуто до заводських налаштувань.",
@@ -1366,6 +1362,7 @@
  "Advanced settings": "Додаткові налаштування",
  "Hide advanced settings": "Сховати додаткові налаштування",
  "Thread priority = process class base + thread level. With the class Normal (base 8): Normal 8, Above normal 9, High (Highest) 10, Time critical 15 - the top of the normal range; real-time levels (16-31) exist only in the Realtime class, which grobyq never sets. A thread at 15 wins every contest on its core: give it to one thread and judge by frame-time (1% low), not average FPS.": "Пріоритет потоку = база класу процесу + рівень потоку. За класу «Звичайний» (база 8): Звичайний 8, Вище середнього 9, Високий (найвищий) 10, Критичний за часом 15 — верх звичайного діапазону; рівні реального часу (16–31) є лише в класу Realtime, який grobyq не ставить ніколи. Потік на 15 виграє в усіх на своєму ядрі: давай його одному потоку й суди за frame-time (1% low), а не за середнім FPS.",
- "Threads named {0}.": "Потоки з описом {0}.",
- "Threads that start in {0}.": "Потоки, що стартують у {0}."
+ "No thread rules: only the process settings above apply.": "Правил потоків немає: діють лише налаштування процесу вище.",
+ "Saved - applies when the game starts.": "Збережено — застосується під час запуску гри.",
+ "Thread rules: {0}": "Правила потоків: {0}"
 }
