@@ -483,7 +483,7 @@ namespace Grobyq
     public sealed class CheckRow : System.Windows.Controls.Border
     {
         private bool _checked, _hot, _divider = true;
-        private readonly System.Windows.Controls.TextBlock _value;
+        private readonly System.Windows.Controls.TextBlock _value, _hint;
         private readonly System.Windows.Controls.Border _box, _line;
         private readonly System.Windows.Shapes.Path _tick;
         public event System.Action CheckedChanged;
@@ -503,6 +503,11 @@ namespace Grobyq
             text.Children.Add(Ui.Semi(title, 10, caution ? "Warn" : "Fg"));
             if (!string.IsNullOrEmpty(desc)) { var d = Ui.Text(desc, 8.75, "Dim"); d.Margin = new System.Windows.Thickness(0, 1, 0, 0); text.Children.Add(d); }
             if (!string.IsNullOrEmpty(note)) { var n = Ui.Text("⚠ " + note, 8.75, "Warn"); n.Margin = new System.Windows.Thickness(0, 2, 0, 0); text.Children.Add(n); }
+            // a state line set after a scan ("Discord is running: close it to clean.", "Found: ...")
+            _hint = Ui.Text("", 8.75, "Warn");
+            _hint.Margin = new System.Windows.Thickness(0, 2, 0, 0);
+            _hint.Visibility = System.Windows.Visibility.Collapsed;
+            text.Children.Add(_hint);
             g.Children.Add(text);
             _value = Ui.Text("", 9.5, "Fg", false);
             _value.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
@@ -539,6 +544,13 @@ namespace Grobyq
         public string Value { get { return _value.Text; } set { _value.Text = value ?? ""; } }
         public System.Windows.Media.Brush ValueBrush { set { _value.Foreground = value; } }
         public bool Divider { set { _divider = value; Paint(); } }
+
+        public void SetHint(string text, string brush = "Warn")
+        {
+            _hint.Text = text ?? "";
+            _hint.Foreground = Ui.B(brush);
+            _hint.Visibility = string.IsNullOrEmpty(text) ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+        }
 
         private void Paint()
         {

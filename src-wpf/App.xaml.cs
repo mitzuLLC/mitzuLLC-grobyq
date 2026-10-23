@@ -260,6 +260,68 @@ namespace Grobyq
                 return prios && boost && match && kinds && reference && levels && notes;
             });
             chk("cleaner", () => Cleaner.Items().Count > 0);
+            chk("app caches", () =>
+            {
+                // 4.0.8: a real clean in a sandbox under %TEMP%: caches go; sign-ins, Spotify downloads, Steam config, Telegram
+                // keys and anti-cheat folders stay; a link inside an app folder is not followed; Spotify gets storage.size=1024.
+                // Then this PC: every folder the found rows would touch passes the guard (nothing is deleted here).
+                L.Load("ru");
+                string S = Path.Combine(Path.GetTempPath(), "grobyq-selftest-clean");
+                try { if (Directory.Exists(S)) Directory.Delete(S, true); } catch { }
+                Func<string, string> F = rel => { string p = Path.Combine(S, rel); Directory.CreateDirectory(Path.GetDirectoryName(p)); File.WriteAllText(p, "x"); return p; };
+                Func<string, bool> E = rel => File.Exists(Path.Combine(S, rel));
+                var env = new CleanEnv
+                {
+                    Local = Path.Combine(S, "Local"), Roaming = Path.Combine(S, "Roaming"), ProgramData = Path.Combine(S, "ProgramData"), LocalLow = Path.Combine(S, "LocalLow"),
+                    SystemDrive = Path.Combine(S, "C") + "\\", Steam = Path.Combine(S, "Steam")
+                };
+                Directory.CreateDirectory(env.Steam);
+                env.SteamLibs = CleanEnv.SteamLibraries(env.Steam);
+                F(@"Roaming\discord\Cache\Cache_Data\f_1"); F(@"Roaming\discord\Code Cache\js\a"); F(@"Roaming\discord\Local Storage\leveldb\1.log"); F(@"Roaming\discord\Network\Cookies");
+                F(@"Roaming\discord\Preferences"); F(@"Roaming\discord\Local State");
+                F(@"Local\Spotify\Data\a\1"); F(@"Local\Spotify\Storage\b\song"); F(@"Roaming\Spotify\prefs");
+                F(@"Steam\appcache\httpcache\a"); F(@"Steam\config\loginusers.vdf"); F(@"Steam\userdata\1\remote\save");
+                F(@"Roaming\Telegram Desktop\tdata\user_data\cache\x"); F(@"Roaming\Telegram Desktop\tdata\key_datas");
+                F(@"Roaming\FACEIT\Local State"); F(@"Roaming\FACEIT\Preferences"); F(@"Roaming\FACEIT\Cache\x");
+                F(@"Roaming\SomeApp\Local State"); F(@"Roaming\SomeApp\Preferences"); F(@"Roaming\SomeApp\Cache\x"); F(@"Roaming\SomeApp\Local Storage\leveldb\t");
+                F(@"C\NVIDIA\DisplayDriver\1\setup.exe"); F(@"elsewhere\keep.txt"); F(@"Roaming\Slack\Local State"); F(@"Roaming\Slack\Preferences");
+                bool link = false;
+                try { Directory.CreateSymbolicLink(Path.Combine(S, @"Roaming\Slack\Cache"), Path.Combine(S, "elsewhere")); link = true; } catch { }
+                var cat = AppCaches.Catalog();
+                string why;
+                try
+                {
+                    Cleaner.Env = env;
+                    Cleaner.SetRunning(new string[0]);
+                    var rows = Cleaner.AppItems(cat);
+                    rows.Add(new CleanItem { Key = "drivers", Title = "drivers", Parts = () => AppCaches.DriverParts(env) });
+                    foreach (var it in rows) Cleaner.Clean(it, s => { });
+                    bool gone = !E(@"Roaming\discord\Cache\Cache_Data\f_1") && !E(@"Roaming\discord\Code Cache\js\a") && !E(@"Local\Spotify\Data\a\1") && !E(@"Steam\appcache\httpcache\a")
+                             && !E(@"Roaming\Telegram Desktop\tdata\user_data\cache\x") && !E(@"Roaming\SomeApp\Cache\x") && !E(@"C\NVIDIA\DisplayDriver\1\setup.exe");
+                    bool kept = E(@"Roaming\discord\Local Storage\leveldb\1.log") && E(@"Roaming\discord\Network\Cookies") && E(@"Local\Spotify\Storage\b\song") && E(@"Steam\config\loginusers.vdf")
+                             && E(@"Steam\userdata\1\remote\save") && E(@"Roaming\Telegram Desktop\tdata\key_datas") && E(@"Roaming\FACEIT\Cache\x") && E(@"Roaming\SomeApp\Local Storage\leveldb\t") && E(@"elsewhere\keep.txt");
+                    bool prefs = File.ReadAllText(Path.Combine(S, @"Roaming\Spotify\prefs")).Contains("storage.size=1024");
+                    bool guard = !AppCaches.Safe(env.Roaming, env, out why) && !AppCaches.Safe(Path.Combine(env.Roaming, "discord"), env, out why)
+                              && !AppCaches.Safe(Path.Combine(env.Roaming, "discord", "Local Storage"), env, out why) && !AppCaches.Safe(@"C:\Windows\System32", env, out why)
+                              && !AppCaches.Safe(Path.Combine(env.Steam, "config"), env, out why) && (!link || !AppCaches.Safe(Path.Combine(S, @"Roaming\Slack\Cache"), env, out why));
+                    // this PC (read only): every folder of every found row passes the guard
+                    Cleaner.Env = null;
+                    Cleaner.BeginPass();
+                    int n = 0, bad = 0;
+                    var appRows = Cleaner.AppItems(cat);
+                    int foundHere = appRows.Count(i => i.Key.StartsWith("app:", StringComparison.Ordinal) && i.Key != "app:other");
+                    foreach (var it in appRows.Concat(Cleaner.Items().Where(i => i.Parts != null)))
+                        foreach (var p in Cleaner.PartsOf(it)) { n++; if (!AppCaches.Safe(p.Path, Cleaner.Env, out why)) { bad++; if (bad <= 3) log.Add("      unsafe: " + p.Path + " - " + why); } }
+                    log.Add("      app caches: " + cat.Count + " apps in the catalog, " + foundHere + " found on this PC, " + n + " folders checked, link test " + (link ? "run" : "skipped"));
+                    return gone && kept && prefs && guard && bad == 0 && cat.Count >= 40 && cat.Select(a => a.Key).Distinct().Count() == cat.Count;
+                }
+                finally
+                {
+                    Cleaner.Env = null;
+                    Cleaner.SetRunning(new string[0]);
+                    try { Directory.Delete(S, true); } catch { }
+                }
+            });
             chk("hwid", () => GrobLic.Hwid().Length > 0);
             chk("license url", () => Licensing.ListUrl.StartsWith("https://", StringComparison.Ordinal) &&
                 Licensing.ApiUrlFor(Licensing.ListUrlDefault) == "https://api.github.com/repos/mitzuLLC/grobpc-licenses/contents/licenses.json?ref=main");

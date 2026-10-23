@@ -10,24 +10,46 @@ using Microsoft.Win32;
 
 namespace Grobyq
 {
+    // One folder of a cleanup row with its own rule: which files (mask, age, recursion), which processes hold it, and
+    // whether it is an app folder that must pass AppCaches.Safe before anything inside is deleted.
+    public sealed class CleanPart
+    {
+        public string Path;
+        public string Pattern = "*";
+        public int MinAgeDays;                       // only files older than this (logs, replays)
+        public bool TopOnly;
+        public string[] Owners = new string[0];      // process names (no .exe): while one runs, the folder is skipped
+        public string App;                           // shown in "close X" hints and the log
+        public bool Guard;                           // app data folder: checked by AppCaches.Safe
+        public bool Probe;                           // Chromium cache: skipped while its index files are held open
+    }
+
     // One cleanup category: folders (or a special action), a size scan, a delete.
     public sealed class CleanItem
     {
         public string Key, Title, Desc, Note;
         public bool Recommended, Caution;
+        public string Group = "windows";             // windows | apps
+        public string AppGroup = "";                 // apps: games | chat | media | stream | devices | work | dev | other
         public Func<List<string>> Roots = () => new List<string>();
+        public Func<List<CleanPart>> Parts;          // per-folder rules; when set, Roots / Pattern / MinAgeDays / TopOnly are not used
         public string Pattern = "*";                 // file mask inside the roots
         public int MinAgeDays;                       // only files older than this (logs)
         public bool TopOnly;                         // do not recurse (e.g. thumbcache_*.db)
         public string[] StopServices = new string[0];
+        public string[] Owners = new string[0];      // processes that hold the item (Roots items)
         public string Special;                       // "recycle" | "do"
+        public bool AskFirst;                        // a second question with the count and size before the delete (CS2 replays)
+        public Action<Action<string>> After;         // a step after a clean (Spotify cache limit)
 
         public long Size; public int Files; public bool Scanned; public string ScanNote = "";
+        public List<string> Running = new List<string>();    // apps of this row that run at the last scan (skipped by Clean)
+        public List<string> Found = new List<string>();      // apps behind the folders (Other apps row)
+        public DateTime Oldest = DateTime.MaxValue, Newest = DateTime.MinValue;   // file dates of the counted files
     }
 
     public static class Cleaner
     {
-        private static string Env(string name) { return Environment.GetEnvironmentVariable(name) ?? ""; }
         private static string Win { get { return Environment.GetFolderPath(Environment.SpecialFolder.Windows); } }
         private static string Local { get { return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); } }
         private static string ProgData { get { return Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData); } }
@@ -65,15 +87,19 @@ namespace Grobyq
                 new CleanItem { Key = "thumbs",
                     Title = L.T("Thumbnail and icon cache"), Desc = L.T("Explorer thumbcache / iconcache databases. Rebuilt automatically; files Explorer holds open are skipped."),
                     Roots = () => P(Path.Combine(Local, @"Microsoft\Windows\Explorer")), Pattern = "*cache_*.db", TopOnly = true },
+                new CleanItem { Key = "drivers", Recommended = true,
+                    Title = L.T("Driver installer leftovers"), Desc = L.T("Unpacked and downloaded driver installers: C:\\NVIDIA, C:\\AMD and the downloads of the NVIDIA app and GeForce Experience. Not needed once the driver is installed."),
+                    Parts = () => AppCaches.DriverParts(Env) },
                 new CleanItem { Key = "shaders", Caution = true,
-                    Title = L.T("GPU shader caches"), Desc = L.T("DirectX (D3DSCache), NVIDIA (DXCache, GLCache, NV_Cache), AMD (DxCache, VkCache) and Intel shader caches."),
+                    Title = L.T("GPU shader caches"), Desc = L.T("DirectX (D3DSCache), NVIDIA (DXCache, GLCache, NV_Cache), AMD (DxCache, VkCache), Intel and Steam shader caches."),
                     Note = L.T("Only after a driver update or when a game shows corrupted shaders: the first match after cleaning recompiles shaders and stutters."),
-                    Roots = () => P(Path.Combine(Local, "D3DSCache"), Path.Combine(Local, @"NVIDIA\DXCache"), Path.Combine(Local, @"NVIDIA\GLCache"), Path.Combine(LocalLow, @"NVIDIA\PerDriverVersion\DXCache"),
-                                   Path.Combine(ProgData, @"NVIDIA Corporation\NV_Cache"), Path.Combine(Local, @"AMD\DxCache"), Path.Combine(Local, @"AMD\DxcCache"), Path.Combine(Local, @"AMD\VkCache"), Path.Combine(LocalLow, @"Intel\ShaderCache")) },
+                    Roots = () => P(new[] { Path.Combine(Local, "D3DSCache"), Path.Combine(Local, @"NVIDIA\DXCache"), Path.Combine(Local, @"NVIDIA\GLCache"), Path.Combine(LocalLow, @"NVIDIA\PerDriverVersion\DXCache"),
+                                   Path.Combine(ProgData, @"NVIDIA Corporation\NV_Cache"), Path.Combine(Local, @"AMD\DxCache"), Path.Combine(Local, @"AMD\DxcCache"), Path.Combine(Local, @"AMD\VkCache"), Path.Combine(Local, @"AMD\GLCache"),
+                                   Path.Combine(LocalLow, @"Intel\ShaderCache") }.Concat(AppCaches.Dirs(Env, @"{SteamLib}\steamapps\shadercache")).ToArray()) },
                 new CleanItem { Key = "browsers", Caution = true,
-                    Title = L.T("Browser caches"), Desc = L.T("Cache, Code Cache and GPUCache of Chrome, Edge, Brave, Opera and the Firefox cache. Logins, history and bookmarks are not touched."),
-                    Note = L.T("Close the browsers first; a running browser keeps its cache locked."),
-                    Roots = BrowserRoots },
+                    Title = L.T("Browser caches"), Desc = L.T("Cache, Code Cache, GPU and site offline caches (Service Worker) of Chrome, Edge, Yandex, Brave, Opera, Vivaldi and the Firefox cache. Logins, history and bookmarks are not touched."),
+                    Note = L.T("A running browser is skipped: close it first."),
+                    Parts = () => AppCaches.BrowserParts(Env) },
                 new CleanItem { Key = "recycle", Special = "recycle", Caution = true,
                     Title = L.T("Recycle Bin"), Desc = L.T("Empties the Recycle Bin on all drives."),
                     Note = L.T("Deleted files cannot be restored afterwards.") },
@@ -81,52 +107,118 @@ namespace Grobyq
             return list;
         }
 
-        private static List<string> BrowserRoots()
+        // ---------------------------------------------------------------- app rows
+        // Rows for the apps of the catalog found on this PC, the CS2 replays (CS2 installed) and the Other apps row.
+        public static List<CleanItem> AppItems(List<AppDef> catalog)
         {
-            var res = new List<string>();
-            var chromium = new[] { @"Google\Chrome\User Data", @"Microsoft\Edge\User Data", @"BraveSoftware\Brave-Browser\User Data", @"Vivaldi\User Data" };
-            foreach (var c in chromium)
+            var env = Env;
+            var list = new List<CleanItem>();
+            foreach (var d in catalog)
             {
-                string ud = Path.Combine(Local, c);
-                if (!Directory.Exists(ud)) continue;
-                try
+                if (!AppCaches.Found(d, env)) continue;
+                var def = d;
+                list.Add(new CleanItem
                 {
-                    foreach (var prof in Directory.GetDirectories(ud))
-                        foreach (var sub in new[] { "Cache", "Code Cache", "GPUCache" })
-                        {
-                            string p = Path.Combine(prof, sub);
-                            if (Directory.Exists(p)) res.Add(p);
-                        }
-                    foreach (var sub in new[] { "ShaderCache", "GrShaderCache" }) { string p = Path.Combine(ud, sub); if (Directory.Exists(p)) res.Add(p); }
-                }
-                catch { }
+                    Key = "app:" + d.Key, Group = "apps", AppGroup = d.Group, Title = d.Name, Desc = d.Desc, Note = d.Note,
+                    Caution = d.Caution, Recommended = !d.Caution, Owners = d.Owners,
+                    Parts = () => AppCaches.Parts(def, Env),
+                    After = def.After == null ? null : (Action<Action<string>>)(log => def.After(Env, log))
+                });
             }
-            string opera = Path.Combine(Local, @"Opera Software");
-            try { if (Directory.Exists(opera)) foreach (var d in Directory.GetDirectories(opera)) foreach (var sub in new[] { "Cache", "Code Cache", "GPUCache" }) { string p = Path.Combine(d, sub); if (Directory.Exists(p)) res.Add(p); } } catch { }
-            string ff = Path.Combine(Local, @"Mozilla\Firefox\Profiles");
-            try { if (Directory.Exists(ff)) foreach (var d in Directory.GetDirectories(ff)) { string p = Path.Combine(d, "cache2"); if (Directory.Exists(p)) res.Add(p); } } catch { }
+            if (AppCaches.Cs2Installed(env))
+                list.Add(new CleanItem
+                {
+                    Key = "cs2replays", Group = "apps", AppGroup = "games", Caution = true, AskFirst = true, Owners = new[] { "cs2" },
+                    Title = L.T("CS2 match replays (older than 30 days)"),
+                    Desc = L.T("Downloaded demos in game\\csgo\\replays, 50-150 MB each. Valve keeps replays for about 30 days, so old ones cannot be downloaded again."),
+                    Note = L.T("Asks again before deleting and shows how many and how big."),
+                    Parts = () => AppCaches.Cs2Parts(Env)
+                });
+            list.Add(new CleanItem
+            {
+                Key = "app:other", Group = "apps", AppGroup = "other", Recommended = true,
+                Title = L.T("Other apps (found automatically)"),
+                Desc = L.T("Web caches of the other Chromium-based apps on this PC (Electron, CEF, WebView2): Cache, Code Cache and GPU caches only. Sign-ins and settings stay."),
+                Parts = () => AppCaches.OtherParts(Env, catalog)
+            });
+            return list;
+        }
+
+        // ---------------------------------------------------------------- pass state
+        // Folders and running processes are read once per scan / clean pass (BeginPass), not per row.
+        private static CleanEnv _env;
+        private static HashSet<string> _running = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static CleanEnv Env { get { return _env ?? (_env = CleanEnv.Current()); } set { _env = value; } }
+
+        public static void BeginPass()
+        {
+            _env = CleanEnv.Current();
+            _running = RunningNames();
+        }
+
+        // Tests set the running list directly.
+        public static void SetRunning(IEnumerable<string> names) { _running = new HashSet<string>(names ?? new string[0], StringComparer.OrdinalIgnoreCase); }
+
+        private static HashSet<string> RunningNames()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var p in Process.GetProcesses())
+                {
+                    try { set.Add(p.ProcessName); } catch { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { }
+            return set;
+        }
+
+        private static bool OwnerRunning(string[] owners)
+        {
+            if (owners == null) return false;
+            foreach (var o in owners) if (!string.IsNullOrEmpty(o) && _running.Contains(o)) return true;
+            return false;
+        }
+
+        // A part is busy while one of its processes runs, or (Chromium caches) while its index files are held open.
+        private static bool Busy(CleanPart p) { return OwnerRunning(p.Owners) || (p.Probe && AppCaches.InUse(p.Path)); }
+
+        public static List<CleanPart> PartsOf(CleanItem it)
+        {
+            if (it.Parts != null) { try { return it.Parts() ?? new List<CleanPart>(); } catch { return new List<CleanPart>(); } }
+            var res = new List<CleanPart>();
+            List<string> roots;
+            try { roots = it.Roots(); } catch { roots = new List<string>(); }
+            foreach (var r in roots) res.Add(new CleanPart { Path = r, Pattern = it.Pattern, MinAgeDays = it.MinAgeDays, TopOnly = it.TopOnly, Owners = it.Owners ?? new string[0], App = it.Title });
             return res;
         }
 
         // ---------------------------------------------------------------- scan
         public static void Scan(CleanItem it)
         {
-            it.Size = 0; it.Files = 0; it.ScanNote = "";
+            it.Size = 0; it.Files = 0; it.ScanNote = ""; it.Running = new List<string>(); it.Found = new List<string>();
+            it.Oldest = DateTime.MaxValue; it.Newest = DateTime.MinValue;
             if (it.Special == "recycle") { RecycleInfo(out it.Size, out it.Files); it.Scanned = true; return; }
-            DateTime cutoff = DateTime.Now.AddDays(-it.MinAgeDays);
-            foreach (var root in it.Roots())
+            foreach (var part in PartsOf(it))
             {
+                string app = part.App ?? it.Title;
+                if (!it.Found.Contains(app)) it.Found.Add(app);
+                try { if (Busy(part) && !it.Running.Contains(app)) it.Running.Add(app); } catch { }
+                DateTime cutoff = DateTime.Now.AddDays(-part.MinAgeDays);
+                string root = part.Path;
                 try
                 {
-                    if (File.Exists(root)) { var fi = new FileInfo(root); if (it.MinAgeDays == 0 || fi.LastWriteTime < cutoff) { it.Size += fi.Length; it.Files++; } continue; }
+                    if (File.Exists(root)) { var fi = new FileInfo(root); if (part.MinAgeDays == 0 || fi.LastWriteTime < cutoff) Count(it, fi); continue; }
                     if (!Directory.Exists(root)) continue;
-                    foreach (var f in Walk(root, it.Pattern, it.TopOnly))
+                    foreach (var f in Walk(root, part.Pattern, part.TopOnly))
                     {
                         try
                         {
                             var fi = new FileInfo(f);
-                            if (it.MinAgeDays > 0 && fi.LastWriteTime >= cutoff) continue;
-                            it.Size += fi.Length; it.Files++;
+                            if (part.MinAgeDays > 0 && fi.LastWriteTime >= cutoff) continue;
+                            Count(it, fi);
                         }
                         catch { }
                     }
@@ -134,7 +226,16 @@ namespace Grobyq
                 catch (UnauthorizedAccessException) { it.ScanNote = "access denied"; }
                 catch { }
             }
+            if (OwnerRunning(it.Owners) && it.Parts == null && !it.Running.Contains(it.Title)) it.Running.Add(it.Title);
             it.Scanned = true;
+        }
+
+        private static void Count(CleanItem it, FileInfo fi)
+        {
+            it.Size += fi.Length; it.Files++;
+            var t = fi.LastWriteTime;
+            if (t < it.Oldest) it.Oldest = t;
+            if (t > it.Newest) it.Newest = t;
         }
 
         // Directory walk that survives access-denied folders and never follows junctions.
@@ -160,6 +261,8 @@ namespace Grobyq
         }
 
         // ---------------------------------------------------------------- clean
+        // A busy folder (its app runs) is skipped and named in the log; an app folder that fails AppCaches.Safe is never
+        // touched. Files in use are skipped, never forced.
         public static long Clean(CleanItem it, Action<string> log)
         {
             if (it.Special == "recycle")
@@ -177,6 +280,7 @@ namespace Grobyq
                 Scan(it);
                 return Math.Max(0, before - it.Size);
             }
+            if (it.Parts == null && OwnerRunning(it.Owners)) { log("[CL] " + it.Title + ": running - skipped (close it and clean again)"); return 0; }
 
             var stopped = new List<ServiceController>();
             foreach (var name in it.StopServices)
@@ -194,23 +298,38 @@ namespace Grobyq
             }
 
             long freed = 0; int files = 0, locked = 0;
-            DateTime cutoff = DateTime.Now.AddDays(-it.MinAgeDays);
+            var busy = new List<string>();
+            bool ownerBusy = OwnerRunning(it.Owners);
             try
             {
-                foreach (var root in it.Roots())
+                foreach (var part in PartsOf(it))
                 {
+                    string root = part.Path;
+                    if (Busy(part))
+                    {
+                        string app = part.App ?? it.Title;
+                        if (!busy.Contains(app)) busy.Add(app);
+                        if (part.Owners != null && part.Owners.Length > 0) ownerBusy = true;
+                        continue;
+                    }
+                    if (part.Guard)
+                    {
+                        string why;
+                        if (!AppCaches.Safe(root, Env, out why)) { log("[CL] not touched: " + root + " (" + why + ")"); continue; }
+                    }
+                    DateTime cutoff = DateTime.Now.AddDays(-part.MinAgeDays);
                     if (File.Exists(root))
                     {
                         long len = 0; try { len = new FileInfo(root).Length; File.SetAttributes(root, FileAttributes.Normal); File.Delete(root); freed += len; files++; } catch { locked++; }
                         continue;
                     }
                     if (!Directory.Exists(root)) continue;
-                    foreach (var f in Walk(root, it.Pattern, it.TopOnly).ToList())
+                    foreach (var f in Walk(root, part.Pattern, part.TopOnly).ToList())
                     {
                         try
                         {
                             var fi = new FileInfo(f);
-                            if (it.MinAgeDays > 0 && fi.LastWriteTime >= cutoff) continue;
+                            if (part.MinAgeDays > 0 && fi.LastWriteTime >= cutoff) continue;
                             long len = fi.Length;
                             if ((fi.Attributes & (FileAttributes.ReadOnly | FileAttributes.System | FileAttributes.Hidden)) != 0) fi.Attributes = FileAttributes.Normal;
                             fi.Delete();
@@ -218,7 +337,7 @@ namespace Grobyq
                         }
                         catch { locked++; }
                     }
-                    if (!it.TopOnly) RemoveEmptyDirs(root);
+                    if (!part.TopOnly) RemoveEmptyDirs(root);
                 }
             }
             finally
@@ -229,7 +348,12 @@ namespace Grobyq
                     catch (Exception ex) { log("[CL] start " + sc.ServiceName + " failed: " + ex.Message + " (it starts on demand anyway)"); }
                 }
             }
+            if (busy.Count > 0) log("[CL] " + it.Title + ": running, skipped - " + string.Join(", ", busy) + " (close and clean again)");
             log(string.Format("[CL] {0}: {1} files, {2} freed{3}", it.Title, files, Human(freed), locked > 0 ? ", " + locked + " in use / protected (skipped)" : ""));
+            if (it.After != null && !ownerBusy)
+            {
+                try { it.After(log); } catch (Exception ex) { log("[CL] " + it.Title + ": " + ex.Message); }
+            }
             return freed;
         }
 
@@ -371,6 +495,22 @@ namespace Grobyq
             }
             log(string.Format("[CL] event logs cleared: {0} ({1} skipped - in use or protected)", n, fail));
             return n;
+        }
+
+        // ---------------------------------------------------------------- hibernation file
+        // powercfg /hibernate off deletes hiberfil.sys and turns off Hibernate and Fast Startup; on brings them back (T1, powercfg).
+        public static string HiberPath { get { string sd = Env.SystemDrive; return Path.Combine(string.IsNullOrEmpty(sd) ? @"C:\" : sd, "hiberfil.sys"); } }
+
+        public static long HiberSize()
+        {
+            try { var fi = new FileInfo(HiberPath); return fi.Exists ? fi.Length : -1; } catch { return -1; }
+        }
+
+        public static string SetHibernate(bool on, Action<string> log)
+        {
+            string o = RunTool("powercfg.exe", on ? "/hibernate on" : "/hibernate off", null, 60000).Trim();
+            log("[CL] powercfg /hibernate " + (on ? "on" : "off") + (o.Length > 0 ? " - " + o : ""));
+            return o;
         }
 
         public static string Human(long bytes)

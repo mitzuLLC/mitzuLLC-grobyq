@@ -8,16 +8,18 @@ using System.Windows.Input;
 
 namespace Grobyq.Pages
 {
-    // System cleanup: file categories with a size scan, plus the Windows tools (DISM, Disk Cleanup handlers, event logs).
-    // Nothing is deleted until a Clean / Run button is pressed and confirmed (the v3.6.8 page).
+    // System cleanup: Windows and browser rows, app caches (the catalog apps found on this PC, CS2 replays, other
+    // Chromium-based apps), the Windows tools (DISM, Disk Cleanup handlers, hibernation file, event logs). One Scan /
+    // Clean selected bar pinned under the page acts on every ticked row. Nothing is deleted until Clean selected is
+    // pressed and confirmed; a running app is skipped, never closed.
     public sealed class CleanupPage : PageBase
     {
         private readonly List<CleanItem> _items;
-        private readonly List<CheckRow> _rows = new List<CheckRow>();      // one row per file category (Data = CleanItem)
+        private readonly List<CheckRow> _rows = new List<CheckRow>();      // one row per category (Data = CleanItem)
         private readonly List<CheckRow> _hRows = new List<CheckRow>();     // Disk Cleanup handlers (Data = Handler)
         private readonly StackPanel _hList;
-        private readonly TextBlock _hEmpty, _total, _dismInfo;
-        private readonly Button _scan, _clean, _recommended, _dismAnalyze, _dismRun, _cmRun, _evRun;
+        private readonly TextBlock _hEmpty, _total, _dismInfo, _hiberInfo;
+        private readonly Button _scan, _clean, _recommended, _dismAnalyze, _dismRun, _cmRun, _evRun, _hiberBtn;
         private readonly CheckBox _resetBase;
         private List<Cleaner.Handler> _handlers = new List<Cleaner.Handler>();
         private bool _loaded;
@@ -27,36 +29,42 @@ namespace Grobyq.Pages
 
         public CleanupPage() : base(800)
         {
-            try { _items = Cleaner.Items(); } catch { _items = new List<CleanItem>(); }
-            Title(L.T("System cleanup"));
-            Add(Ui.Text(L.T("Removes what Windows and apps leave behind: temp files, update caches, old logs, error reports, dumps, shader and browser caches. Scan first to see the sizes; nothing is deleted until you press Clean. Files in use are skipped, never forced."), 9.5, "Dim"), 4);
+            List<AppDef> catalog;
+            List<CleanItem> win, apps;
+            try { catalog = AppCaches.Catalog(); } catch { catalog = new List<AppDef>(); }
+            try { win = Cleaner.Items(); } catch { win = new List<CleanItem>(); }
+            try { apps = Cleaner.AppItems(catalog); } catch { apps = new List<CleanItem>(); }
+            _items = win.Concat(apps).ToList();
 
-            // ---- quick cleanup ----
-            Heading(L.T("Quick cleanup"), true);
+            Title(L.T("System cleanup"));
+            Add(Ui.Text(L.T("Removes what Windows and apps leave behind: temp files, update caches, old logs, error reports, dumps, shader, browser and app caches. Sign-ins, settings and your files stay. Scan first to see the sizes; nothing is deleted until you press Clean selected. Files in use are skipped, never forced."), 9.5, "Dim"), 4);
+
+            // ---- Windows and browsers ----
+            Heading(L.T("Windows and browsers"), true);
             var card = Box();
-            _scan = Ui.Btn(L.T("Scan"), "BtnAccent");
-            _clean = Ui.Btn(L.T("Clean selected"), "BtnDanger");
-            _recommended = Ui.Btn(L.T("Select recommended"));
-            _total = Ui.Semi("", 10, "Fg");
-            _total.VerticalAlignment = VerticalAlignment.Center;
-            var bar = Ui.Strip(44, _scan, _clean, _recommended, _total);
-            bar.Margin = new Thickness(0, 8, 0, 4);
-            _total.Margin = new Thickness(10, 7, 0, 0);
-            card.Add(bar);
-            foreach (var it in _items)
-            {
-                var row = new CheckRow(it.Title, it.Desc, it.Note, it.Caution) { Data = it, Value = "—" };
-                row.Checked = it.Recommended;
-                row.CheckedChanged += UpdateTotal;
-                _rows.Add(row);
-                card.Add(row);
-            }
+            foreach (var it in win) card.Add(MakeRow(it));
             if (_rows.Count > 0) _rows[_rows.Count - 1].Divider = false;
             var amber = card.Add(Ui.Text(L.T("Amber = read the warning first (unchecked by default). grobyq runs as administrator, so Windows folders are reachable; anything that is open by a program stays."), 9, "Dim"));
             amber.Margin = new Thickness(0, 8, 0, 8);
-            _scan.Click += (s, e) => ScanAll(null);
-            _clean.Click += (s, e) => CleanSelected();
-            _recommended.Click += (s, e) => { foreach (var r in _rows) { var ci = r.Data as CleanItem; if (ci != null) r.Checked = ci.Recommended; } UpdateTotal(); };
+
+            // ---- app caches ----
+            Heading(L.T("App caches"), false);
+            var ac = Box();
+            int found = apps.Count(a => a.Key.StartsWith("app:", StringComparison.Ordinal) && a.Key != "app:other");
+            var intro = ac.Add(Ui.Text(L.F("Found {0} of {1} supported apps on this PC. Only caches, old logs and crash reports are removed: sign-ins, settings, chats, saves and downloads stay. A running app is skipped - close it first; grobyq never closes programs.", found, catalog.Count), 9, "Dim"));
+            intro.Margin = new Thickness(0, 8, 0, 2);
+            foreach (var g in AppCaches.GroupOrder)
+            {
+                var inGroup = apps.Where(a => a.AppGroup == g).ToList();
+                if (inGroup.Count == 0) continue;
+                var gh = ac.Add(Ui.Semi(AppCaches.GroupTitle(g), 9.5, "Faint"));
+                gh.Margin = new Thickness(10, 12, 0, 2);
+                CheckRow last = null;
+                foreach (var it in inGroup) last = ac.Add(MakeRow(it));
+                if (last != null) last.Divider = false;
+            }
+            var sup = ac.Add(Ui.Text(L.F("Supported: {0}.", string.Join(", ", catalog.Select(c => c.Name))), 8.5, "Faint"));
+            sup.Margin = new Thickness(0, 10, 0, 8);
 
             // ---- Windows tools ----
             Heading(L.T("Windows tools (deep)"), false);
@@ -84,6 +92,14 @@ namespace Grobyq.Pages
             hs.Margin = new Thickness(0, 8, 0, 4);
             hc.Add(hs);
 
+            var hb = Box();
+            _hiberBtn = Ui.Btn(L.T("Turn off hibernation"), "BtnOutline");
+            _hiberBtn.Click += (s, e) => ToggleHibernate();
+            hb.Add(Ui.Row(L.T("Hibernation file (hiberfil.sys)"), L.T("Windows keeps the RAM contents for Hibernate and Fast Startup in C:\\hiberfil.sys. Turning hibernation off deletes it: Hibernate and Fast Startup stop working and every shutdown is a full one. On a laptop the critical battery action can no longer be Hibernate. It can be turned back on here at any time."), _hiberBtn, false));
+            _hiberInfo = hb.Add(Ui.Text("", 9, "Faint"));
+            _hiberInfo.Margin = new Thickness(0, 0, 0, 8);
+            UpdateHiber();
+
             var ec = Box();
             _evRun = Ui.Btn(L.T("Clear event logs"), "BtnDanger");
             _evRun.Click += (s, e) => ClearEvents();
@@ -96,6 +112,9 @@ namespace Grobyq.Pages
             nt.Margin = new Thickness(0, 8, 0, 4);
             foreach (var line in new[]
             {
+                L.T("• Sign-ins, cookies, history and saved passwords of browsers and apps: cleaning them only logs you out."),
+                L.T("• Spotify downloads, Telegram chats and keys, Steam settings, game saves and recordings."),
+                L.T("• Anti-cheat folders (FACEIT, Vanguard, Easy Anti-Cheat, BattlEye): never touched."),
                 L.T("• Prefetch: Windows uses it to start apps faster. Emptying it makes the next launches slower and brings nothing back (T3 folklore)."),
                 L.T("• Deleting WinSxS, System32 or DriverStore files by hand: breaks updates and driver installs. Use the DISM and Disk Cleanup buttons instead."),
                 L.T("• Registry cleaners: no measurable speed gain, real risk of broken apps."),
@@ -107,7 +126,38 @@ namespace Grobyq.Pages
                 t.Margin = new Thickness(0, 2, 0, 2);
             }
             nc.Stack.Children.Add(new Border { Height = 8 });
+
+            // ---- the Scan / Clean bar, pinned under the page ----
+            var bar = new Grid();
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _total = Ui.Semi("", 10, "Fg");
+            _total.VerticalAlignment = VerticalAlignment.Center;
+            bar.Children.Add(_total);
+            var btns = new StackPanel { Orientation = Orientation.Horizontal };
+            _recommended = Ui.Btn(L.T("Select recommended"), "BtnOutline");
+            _scan = Ui.Btn(L.T("Scan"), "BtnOutline", 110);
+            _scan.Margin = new Thickness(8, 0, 0, 0);
+            _clean = Ui.Btn(L.T("Clean selected"), "BtnDanger", 150);
+            _clean.Margin = new Thickness(8, 0, 0, 0);
+            btns.Children.Add(_recommended); btns.Children.Add(_scan); btns.Children.Add(_clean);
+            Grid.SetColumn(btns, 1);
+            bar.Children.Add(btns);
+            Footer(bar);
+            _scan.Click += (s, e) => ScanAll(null);
+            _clean.Click += (s, e) => CleanSelected();
+            _recommended.Click += (s, e) => { foreach (var r in _rows) { var ci = r.Data as CleanItem; if (ci != null) r.Checked = ci.Recommended; } UpdateTotal(); };
+
             UpdateTotal();
+        }
+
+        private CheckRow MakeRow(CleanItem it)
+        {
+            var row = new CheckRow(it.Title, it.Desc, it.Note, it.Caution) { Data = it, Value = "—" };
+            row.Checked = it.Recommended;
+            row.CheckedChanged += UpdateTotal;
+            _rows.Add(row);
+            return row;
         }
 
         private IEnumerable<CleanItem> Selected()
@@ -117,6 +167,7 @@ namespace Grobyq.Pages
 
         private void UpdateTotal()
         {
+            if (_total == null) return;
             var sel = Selected().ToList();
             long sum = sel.Where(i => i.Scanned).Sum(i => i.Size);
             bool all = sel.All(i => i.Scanned);
@@ -126,7 +177,7 @@ namespace Grobyq.Pages
         private void SetBusy(bool b) { _busy = b; BusyUi(b); }
         private void BusyUi(bool b)
         {
-            foreach (var x in new[] { _scan, _clean, _recommended, _dismAnalyze, _dismRun, _cmRun, _evRun }) if (x != null) x.IsEnabled = !b;
+            foreach (var x in new[] { _scan, _clean, _recommended, _dismAnalyze, _dismRun, _cmRun, _evRun, _hiberBtn }) if (x != null) x.IsEnabled = !b;
             Cursor = b ? Cursors.AppStarting : null;
         }
 
@@ -153,6 +204,7 @@ namespace Grobyq.Pages
             foreach (var r in _rows) if (r.Data is CleanItem ci && todo.Contains(ci)) { r.ValueBrush = Ui.B("Dim"); r.Value = L.T("scanning…"); }
             var th = new Thread(() =>
             {
+                try { Cleaner.BeginPass(); } catch { }
                 foreach (var it in todo)
                 {
                     try { Cleaner.Scan(it); } catch { }
@@ -167,11 +219,18 @@ namespace Grobyq.Pages
         private void ShowSize(CleanItem it)
         {
             foreach (var r in _rows)
-                if (r.Data == it)
+            {
+                if (r.Data != it) continue;
+                r.ValueBrush = it.Size > 500L * 1024 * 1024 ? Ui.B("Warn") : it.Size == 0 ? Ui.B("Faint") : Ui.B("Fg");
+                r.Value = it.Special == "recycle" ? L.F("{0} · {1} items", Cleaner.Human(it.Size), it.Files) : L.F("{0} · {1} files", Cleaner.Human(it.Size), it.Files);
+                string run = it.Running.Count == 0 ? "" : it.Running.Count == 1 ? L.F("{0} is running: close it to clean.", it.Running[0]) : L.F("Running: {0} - close them to clean.", string.Join(", ", it.Running));
+                if (it.Key == "app:other")
                 {
-                    r.ValueBrush = it.Size > 500L * 1024 * 1024 ? Ui.B("Warn") : it.Size == 0 ? Ui.B("Faint") : Ui.B("Fg");
-                    r.Value = it.Special == "recycle" ? L.F("{0} · {1} items", Cleaner.Human(it.Size), it.Files) : L.F("{0} · {1} files", Cleaner.Human(it.Size), it.Files);
+                    string found = it.Found.Count > 0 ? L.F("Found: {0}", string.Join(", ", it.Found)) : L.T("No other Chromium-based apps found.");
+                    r.SetHint(run.Length > 0 ? found + " · " + run : found, run.Length > 0 ? "Warn" : "Dim");
                 }
+                else r.SetHint(run);
+            }
         }
 
         private void CleanSelected()
@@ -182,11 +241,22 @@ namespace Grobyq.Pages
             string list = string.Join("\n", sel.Select(i => "• " + i.Title + (i.Scanned ? "  (" + Cleaner.Human(i.Size) + ")" : "")));
             bool caution = sel.Any(i => i.Caution);
             if (!Dlg.Ask(null, L.T("Delete now?") + "\n\n" + list + (caution ? "\n\n" + L.T("Some categories have a warning - read it in the list.") : ""), caution)) return;
+            // rows that ask again (CS2 replays): how many files, how big, which dates
+            foreach (var it in sel.Where(i => i.AskFirst).ToList())
+            {
+                try { if (!it.Scanned) { Cleaner.BeginPass(); Cleaner.Scan(it); ShowSize(it); } } catch { }
+                if (it.Files == 0) { sel.Remove(it); continue; }
+                string q = L.F("Delete {0} replay files ({1}) downloaded between {2} and {3}? Valve keeps replays for about 30 days, so they cannot be downloaded again.",
+                    it.Files, Cleaner.Human(it.Size), it.Oldest.ToString("d"), it.Newest.ToString("d"));
+                if (!Dlg.Ask(null, q, true)) sel.Remove(it);
+            }
+            if (sel.Count == 0) return;
             SetBusy(true);
             AppLog.Add("[CL] cleanup started: " + string.Join(", ", sel.Select(i => i.Key)));
             var th = new Thread(() =>
             {
                 long total = 0;
+                try { Cleaner.BeginPass(); } catch { }
                 foreach (var it in sel)
                 {
                     try { total += Cleaner.Clean(it, s => AppLog.Add(s)); }
@@ -200,6 +270,40 @@ namespace Grobyq.Pages
                     Dlg.Info(null, L.F("Cleanup finished: {0} freed. Details are in the log.", Cleaner.Human(t)));
                     ScanAll(sel);
                 });
+            }) { IsBackground = true };
+            th.Start();
+        }
+
+        // ---------------------------------------------------------------- hibernation file
+        private void UpdateHiber()
+        {
+            long sz = -1;
+            try { sz = Cleaner.HiberSize(); } catch { }
+            if (sz >= 0)
+            {
+                _hiberInfo.Text = L.F("hiberfil.sys: {0}", Cleaner.Human(sz));
+                _hiberBtn.Content = L.T("Turn off hibernation");
+            }
+            else
+            {
+                _hiberInfo.Text = L.T("Hibernation is off: there is no hiberfil.sys.");
+                _hiberBtn.Content = L.T("Turn on hibernation");
+            }
+        }
+
+        private void ToggleHibernate()
+        {
+            if (_busy) return;
+            long sz = Cleaner.HiberSize();
+            bool on = sz < 0;
+            string q = on ? L.T("Turn hibernation back on? Windows creates hiberfil.sys again, and Hibernate and Fast Startup work again.")
+                          : L.F("Turn hibernation off? hiberfil.sys ({0}) is deleted; Hibernate and Fast Startup stop working.", Cleaner.Human(sz));
+            if (!Dlg.Ask(null, q, !on)) return;
+            SetBusy(true);
+            var th = new Thread(() =>
+            {
+                try { Cleaner.SetHibernate(on, s => AppLog.Add(s)); } catch (Exception ex) { AppLog.Add("[!!] powercfg: " + ex.Message); }
+                Post(() => { SetBusy(false); UpdateHiber(); });
             }) { IsBackground = true };
             th.Start();
         }
