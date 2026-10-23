@@ -11,15 +11,15 @@ namespace Grobyq
 {
     // Drives the engine with two switches and one rule for WHEN things apply: the game session.
     //
-    //   Game threads optimizer   - the game preset (its process part always, its thread part with "Optimize threads") plus
-    //                              the parts switched on and saved (core mask, background list, affinity rules).
+    //   Game threads optimizer   - the game preset (its process part always, its thread rules with "Apply thread rules")
+    //                              plus the parts switched on and saved (core mask, affinity rules).
     //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...), as written.
     //
     // Session = a chosen game is running (alt-tab changes nothing). Session start: everything switched on is applied once.
-    // During the session a catch-up pass every 2 s handles only what is new (threads created later, the hot threads of the
-    // match instead of the menu): the engine reads each value back and writes only what differs, and a thread gets its
-    // Ideal CPU once. Session end (the game closes): every baseline is restored - normal mode. Outside a session nothing is
-    // applied, whatever the switches say. Game mode (opt-in): marked apps close at launch and reopen at exit.
+    // During the session a catch-up pass every 2 s handles only what is new (threads created later, e.g. on map load): the
+    // engine reads each value back and writes only what differs, and a thread gets its Ideal CPU once (only where a rule
+    // sets one). Session end (the game closes): every baseline is restored - normal mode. Outside a session nothing is
+    // applied, whatever the switches say. 4.0.2: hot threads, the background list and game mode are removed.
     //
     // Engine calls run on one worker thread, in order (apply, catch-up, restore): a restore queued after an apply always
     // lands last. Results go to AppLog; StateChanged fires on the UI thread when something visible changed.
@@ -50,10 +50,10 @@ namespace Grobyq
         public string StateName => !Active ? "OFF" : _session ? "ACTIVE" : "ARMED";
 
         // The optional parts of the game optimizer (Settings keys); the preset's process part applies on top of these anyway.
-        public static readonly string[] Parts = { "DoMask", "DoThreads", "DoBackground", "DoAffRules" };
+        public static readonly string[] Parts = { "DoMask", "DoThreads", "DoAffRules" };   // 4.0.2: background list removed
         public static bool AnyPartOn { get { return Parts.Any(Settings.GetBool); } }
         // Game mode: close the apps marked "Close" when the game process appears, reopen them when it is gone.
-        public static bool CloseBgOn { get { return Settings.GetBool("CloseBackground"); } }
+        public static bool CloseBgOn { get { return false; } }   // 4.0.2: game mode (close / reopen background apps) is removed - never on, whatever an old stored value says
 
         public Optimizer()
         {
@@ -64,6 +64,7 @@ namespace Grobyq
             try { var m = Store.Migrate362(Eng); if (m != null && m.Count > 0) AppLog.Add(m); } catch { }
             try { var m2 = Store.MigrateNormalClass(Eng); if (m2 != null && m2.Count > 0) AppLog.Add(m2); } catch { }
             try { var m3 = Store.MigrateHighThreads(Eng); if (m3 != null && m3.Count > 0) AppLog.Add(m3); } catch { }
+            try { var m4 = Store.MigrateSafe402(Eng); if (m4 != null && m4.Count > 0) AppLog.Add(m4); } catch { }   // after 4.0.1: Highest -> Above normal
 
             // v4.0 alpha "Enable at start" = the game switch left on
             if (Settings.GetBool("AutoEnable")) { Settings.Set("GameOpt", "1"); Settings.Set("AutoEnable", "0"); }
@@ -156,7 +157,7 @@ namespace Grobyq
             _game = on;
             Settings.Set("GameOpt", on ? "1" : "0");
             AppLog.Add(on ? "=== GAME THREADS OPTIMIZER ON ===" : "=== GAME THREADS OPTIMIZER OFF ===");
-            if (on && !AnyPartOn) AppLog.Add("[i] only the game preset's process part applies (threads, background, cores are off): switch parts on in Threads and press Save");
+            if (on && !AnyPartOn) AppLog.Add("[i] only the game preset's process part applies (thread rules and cores are off): switch them on in Threads / Affinity and press Save");
             Evaluate(true);
         }
 
@@ -201,7 +202,7 @@ namespace Grobyq
         public void ApplyNow() { if (_session) Evaluate(true); }
 
         // The "Close background on game launch" switch was flipped: close now if a game is already running and the mode is on;
-        // reopen whatever was closed if the mode is now off. Everything grobyq closes is reversible, like every other part.
+        // reopen whatever was closed if the mode is now off. 4.0.2: no caller - game mode is removed (CloseBgOn is false).
         public void CloseModeChanged()
         {
             if (CloseBgOn)
@@ -281,11 +282,10 @@ namespace Grobyq
         {
             MaskName = _game ? GameRule() : Settings.Get("Mask"),   // the game mask matters (and is logged) only for the game layer
             BgMaskName = GameMask.ManualRule(SafeTopo()),
-            TopN = Math.Max(1, Math.Min(32, Settings.GetInt("TopN", 4))),
             DoMask = Settings.GetBool("DoMask"),
             DoThreads = Settings.GetBool("DoThreads"),
-            DoBackground = Settings.GetBool("DoBackground"),
-            BgAffinity = Settings.GetBool("BgAffinity"),
+            DoBackground = false,                                   // 4.0.2: the user background list is removed
+            BgAffinity = false,
             DoAffRules = Settings.GetBool("DoAffRules"),
             Game = _game,
             Sys = _sys,

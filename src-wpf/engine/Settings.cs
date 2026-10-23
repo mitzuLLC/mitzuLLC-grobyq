@@ -14,8 +14,9 @@ namespace Grobyq
         private const string AffSub = @"Software\grobyq\Affinity";
         private const string OldRoot = @"Software\grobPC";
 
-        public static readonly string DefaultBgProcs =
-            "ctfmon.exe textinputhost.exe discord.exe chrome.exe msedge.exe firefox.exe opera.exe obs64.exe steam.exe steamwebhelper.exe Spotify.exe Telegram.exe EpicGamesLauncher.exe RiotClientServices.exe";
+        // 4.0.2: the user background list is removed (owner decision); kept empty so an old stored
+        // list or a settings reset brings nothing back. ctfmon / TextInputHost live in the system threads optimizer.
+        public static readonly string DefaultBgProcs = "";
 
         private static bool _migrated;
         public static string MigrationNote = "";
@@ -102,20 +103,19 @@ namespace Grobyq
                 { "MaskDrop", "" },
                 { "MaskCpu", "" },                // CPU layout signature the edits were made on (GameMask.CpuSig)
                 { "IrqPOnly", "1" },              // interrupt recommender on a hybrid CPU: P-cores only (untick to allow E-cores)
-                { "TopN", "4" },
                 { "Period", "2000" },            // 2 s: 1 s is re-scan overhead, 5 s can miss threads spawned on map load
-                { "BgAffinity", "1" },
+                { "BgAffinity", "0" },            // 4.0.2: background feature removed (key kept so old values read as off)
                 { "BgProcs", DefaultBgProcs },
                 // v4 manual mode: a first run changes NOTHING. Both optimizers start off and every optional part is off;
                 // the user picks what to apply and presses Save. The session always follows the game process (applied at
-                // launch, caught up every 2 s, restored when the game exits); mechanism settings (period, hot thread count)
-                // keep their defaults - they only act on a chosen part.
+                // launch, caught up every 2 s, restored when the game exits); the mechanism setting (period) keeps its
+                // default - it only acts on a chosen part.
                 { "AutoEnable", "0" },
                 { "CloseToTray", "1" },
                 { "DoMask", "0" },                // game core mask (affinity + CPU sets)
                 { "DoThreads", "0" },
-                { "DoBackground", "0" },
-                { "CloseBackground", "0" },       // game mode: close the programs marked "Close" when the game launches, reopen them when it exits (opt-in)
+                { "DoBackground", "0" },          // 4.0.2: background list removed (key kept so old values read as off)
+                { "CloseBackground", "0" },       // 4.0.2: game mode removed (Optimizer.CloseBgOn is always false)
                 { "DoAffRules", "0" },
                 { "ApplyAllPresets", "0" },       // thread-priority presets on programs / services (non-targets)
                 { "SystemThreadOpt", "0" },       // built-in system thread profile (embedded), one switch

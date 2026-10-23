@@ -5,52 +5,19 @@
 [SETTINGS]
 sleep=10000
 
-; When the game window is actively, the script turns off Explorer and its subsidiary processes, also includes the functions of [PROCESSESTOSUSPEND] and [SETPROCESSESTOIDLEPRIORITY]
+; The games this profile was written for. grobyq waits for the games on its own list (Threads > Games); this list is informational.
 [GAMES]
 VALORANT-Win64-Shipping
 cs2
 FortniteClient-Win64-Shipping
 
-; Processes that go to suspend with an active game window
-[PROCESSESTOSUSPEND]
-googleupdate
-searchindexer
-Riot Client
-RiotClientCrashHandler
-RiotClientServices
-GameBarPresenceWriter
-spoolsv
-lghub_agent
-lghub_system_tray
-lghub_updater
-logi_lamparray_service
-MoUsoCoreWorker
-msedgewebview2
-NVDisplay.Container
-notepad
-RazerAppEngine
-RzEngineMon
-ShareX
-sihost
-SteelSeriesGG
-SteelSeriesPrism
-SteelSeriesSvcLauncher
-SteelSeriesSonar
 
-; Processes that go to Low Priority with an active game window
+; 4.0.2 (grobyq): the background lists are cut down (owner decision) - Discord, browsers, launchers and peripheral
+; software are no longer lowered while the game runs. Only the two text-input processes step aside. grobyq never
+; suspends: an entry is lowered to Idle priority while the game runs and restored when it exits.
 [SETPROCESSESTOIDLEPRIORITY]
-;audiodg
-fontdrvhost
-NVIDIA Overlay
-nvsphelper64
-rundll32
-ShareX
-winws
-WmiPrvSE
-Lightshot
-chrome
-Telegram
-steam
+ctfmon
+TextInputHost
 
 ; A list of processes for which a priority boost will leave
 [DISABLEBOOST]

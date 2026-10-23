@@ -19,7 +19,7 @@ namespace Grobyq.Pages
         // games offered as ready checkboxes: exe -> label
         private static readonly string[][] KnownGames = { new[] { "cs2.exe", "CS2" }, new[] { "dota2.exe", "Dota 2" } };
 
-        private readonly CheckBox _gameSw, _sysSw, _closeSw;
+        private readonly CheckBox _gameSw, _sysSw;
         private readonly Ellipse _gameDot, _sysDot;
         private readonly TextBlock _gameStat, _sysStat;
         private readonly Dictionary<string, BoxCheck> _known = new Dictionary<string, BoxCheck>(StringComparer.OrdinalIgnoreCase);
@@ -52,7 +52,7 @@ namespace Grobyq.Pages
                 UpdateState();
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
-                L.T("grobyq's built-in profile while a game runs: thread priorities of system processes, NVIDIA, Steam and Discord. Priority and boost only, fully reversible."),
+                L.T("grobyq's built-in profile while a game runs: thread priorities of system processes, NVIDIA, Steam and Discord; ctfmon and TextInputHost step aside. Priority and boost only, fully reversible."),
                 _sysSw, out _sysDot, out _sysStat, false));
 
             // ---- games ----
@@ -73,40 +73,14 @@ namespace Grobyq.Pages
             _addGame.Height = 28; _addGame.Padding = new Thickness(12, 0, 12, 0); _addGame.Margin = new Thickness(4, 0, 0, 6);
             _addGame.Click += (s, e) => AddGame();
 
-            // ---- what the game optimizer changes: the preset's process part always; the thread part with this switch ----
-            Title(L.T("Game optimizer"));
-            var card = Card();
-            card.Add(SwitchRow(L.T("Optimize threads"), L.T("A scheduler hint for the game: Ideal CPU plus a priority on its busiest threads (named rules and hot threads). Off = no thread of the game is touched."), "DoThreads"));
-            var toAff = Ui.Btn(L.T("Open Affinity"), "BtnOutline");
-            toAff.Click += (s, e) => { var w = MainWindow.Current; if (w != null) w.Navigate("affinity"); };
-            card.Add(Ui.Row(L.T("Cores"), L.T("The game core mask and the per-process rules have their own switches on Affinity (Cores / Processes), saved there."), toAff, false));
-
             // ---- the picked game's preset and thread rules (ThreadsPage.Preset.cs) ----
             BuildPreset();
-
-            // ---- background processes ----
-            Title(L.T("Background processes"));
-            var bg = Card();
-            bg.Add(SwitchRow(L.T("Lower background processes"), L.T("The processes in the list below get a lower class, VeryLow I/O and Low memory priority while the game runs."), "DoBackground"));
-            bg.Add(SwitchRow(L.T("Pin background off the game cores"), L.T("Background processes get the cores the game mask leaves free (E-cores, SMT siblings, the other CCD). Helps most on multi-CCD CPUs or with heavy background; neutral otherwise - measure."), "BgAffinity"));
-            // game mode: an immediate switch (acts at once, like the ones at the top), not a draft - closing / reopening is a
-            // runtime action, fully reversible. Only the chips marked "Close" below are affected.
-            _closeSw = Ui.Switch(Settings.GetBool("CloseBackground"));
-            _closeSw.Click += (s, e) =>
-            {
-                bool on = _closeSw.IsChecked == true;
-                Settings.SetBool("CloseBackground", on);
-                AppLog.Add("[UI] close background on game launch = " + (on ? "on" : "off"));
-                var o = Optimizer.Instance; if (o != null) o.CloseModeChanged();
-            };
-            bg.Add(Ui.Row(L.T("Close background on game launch"), L.T("Acts at once. When a game from the list starts, the programs you mark 'Close' below are asked to close (grobyq never force-kills), then reopened when the game exits. Mark only apps safe to close - unsaved work in them may be lost; an app set to minimize to tray will go to its tray."), _closeSw));
-            BuildBackgroundList(bg);                         // chips + Add (ThreadsPage.Background.cs)
 
             // ---- reset: this page only (the whole app resets in Settings) ----
             var rs = Card();
             var resetBtn = Ui.Btn(L.T("Reset thread settings"), "BtnDangerQuiet");
             resetBtn.Click += (s, e) => ResetThreads();
-            rs.Add(Ui.Row(L.T("Reset thread settings"), L.T("Both optimizers off, every change back to its Windows default; games, parts, game presets and the background list back to the first-run defaults. Affinity and the app settings stay."), resetBtn, false));
+            rs.Add(Ui.Row(L.T("Reset thread settings"), L.T("Both optimizers off, every change back to its Windows default; games, parts and game presets back to the first-run defaults. Affinity and the app settings stay."), resetBtn, false));
 
             // ---- the Save bar, pinned under the page ----
             var bar = new Grid();
@@ -295,8 +269,7 @@ namespace Grobyq.Pages
         // ------------------------------------------------------------------ draft / save
         private void Draft(string key, string value)
         {
-            // the background list keeps a stored empty list empty (Get would answer the default list)
-            string cur = string.Equals(key, "BgProcs", StringComparison.OrdinalIgnoreCase) ? string.Join(" ", Settings.BgProcs()) : Settings.Get(key) ?? "";
+            string cur = Settings.Get(key) ?? "";
             if (string.Equals(value ?? "", cur, StringComparison.Ordinal)) _draft.Remove(key);
             else _draft[key] = value ?? "";
             UpdateSaveBar(null);
@@ -304,7 +277,7 @@ namespace Grobyq.Pages
 
         private void UpdateSaveBar(string done)
         {
-            int changes = _draft.Count + DirtyPresets().Count + (BgClassesDirty() ? 1 : 0);
+            int changes = _draft.Count + DirtyPresets().Count;
             bool dirty = changes > 0;
             bool noGame = _games.Count == 0;
             _save.IsEnabled = dirty && !noGame;
@@ -317,7 +290,7 @@ namespace Grobyq.Pages
 
         private void SaveDraft()
         {
-            if ((_draft.Count == 0 && DirtyPresets().Count == 0 && !BgClassesDirty()) || _games.Count == 0) return;
+            if ((_draft.Count == 0 && DirtyPresets().Count == 0) || _games.Count == 0) return;
             var parts = new List<string>();
             foreach (var kv in _draft)
             {
@@ -327,7 +300,6 @@ namespace Grobyq.Pages
             _draft.Clear();
             if (parts.Count > 0) AppLog.Add("[i] saved: " + string.Join(", ", parts));
             SavePresets();
-            SaveBgClasses();
             var o = Optimizer.Instance;
             bool active = o != null && o.Active;
             if (o != null) o.Reapply();
@@ -350,7 +322,6 @@ namespace Grobyq.Pages
             try
             {
                 foreach (var kv in _switches) kv.Value.IsChecked = Settings.GetBool(kv.Key);
-                if (_closeSw != null) _closeSw.IsChecked = Settings.GetBool("CloseBackground");
                 _games.Clear();
                 _games.AddRange(Settings.WatchList());
                 _labels.Clear();
@@ -359,7 +330,6 @@ namespace Grobyq.Pages
             finally { _loading = false; }
             FillGames();
             FillPick();
-            ResyncBg();
         }
 
         // ------------------------------------------------------------------ state
@@ -372,14 +342,12 @@ namespace Grobyq.Pages
             _sysSw.IsChecked = sys;
             string live = o != null ? o.LiveTarget : "";
             string targets = o != null && o.Eng.Targets != null ? string.Join(", ", o.Eng.Targets) : "cs2.exe";
-            bool userBg = game && Settings.GetBool("DoBackground");
 
             if (!game) Stat(_gameDot, _gameStat, "Faint", L.T("off - games are not touched"));
             else if (string.IsNullOrEmpty(live) || !session) Stat(_gameDot, _gameStat, "Warn", L.F("armed - waiting for {0}", targets));
             else
             {
                 string t = L.F("optimizing {0}", live) + "   ·   " + L.F("threads: {0}", o.Eng.GameThreadCount);
-                if (userBg) t += "   ·   " + L.F("background: {0}", o.Eng.BgOn ? o.Eng.LastBg : 0);
                 Stat(_gameDot, _gameStat, "Ok", t);
             }
 
@@ -388,7 +356,7 @@ namespace Grobyq.Pages
             else
             {
                 string t = L.F("threads: {0}   ·   processes: {1}", o.Eng.SysThreadCount, o.Eng.SysProcCount);
-                if (!userBg && o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);
+                if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // ctfmon / TextInputHost
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
         }

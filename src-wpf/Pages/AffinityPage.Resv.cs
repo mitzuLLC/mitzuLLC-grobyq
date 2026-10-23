@@ -92,7 +92,7 @@ namespace Grobyq.Pages
             string bytes = Reservation.HexText(Reservation.ToBytes(sp.NonGame));
             string text = L.F("Write ReservedCpuSets = {0} (LP {1})?", Masks.Hex(sp.NonGame), Masks.Ranges(sp.NonGame)) + "\n\n" +
                           L.F("Bytes {0} (REG_BINARY, little-endian, bit N = LP N).", bytes) + "\n\n" +
-                          L.F("After a restart the reserved LPs run only what is pinned to them (T1). Windows, services, unpinned programs and hardware interrupts move to the unreserved set = the game set {0}. That adds load next to CS2 unless background apps are pinned to the reserved set (Threads > background list).", "LP " + Masks.Ranges(sp.Game)) + "\n\n" +
+                          L.F("After a restart the reserved LPs run only what is pinned to them (T1). Windows, services, unpinned programs and hardware interrupts move to the unreserved set = the game set {0}. That adds load next to CS2 unless background apps are pinned to the reserved set (Affinity > Processes).", "LP " + Masks.Ranges(sp.Game)) + "\n\n" +
                           L.T("The original value is saved to backup-reservedcpusets.json; Revert restores it.");
             if (Dlg.Show(null, text, true, L.T("Write"), L.T("Cancel")) != 0) return;
             var r = Reservation.ApplyNonGame(t);

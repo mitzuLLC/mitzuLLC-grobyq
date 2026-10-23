@@ -8,12 +8,12 @@ using System.Windows.Media;
 namespace Grobyq.Pages
 {
     // Threads > Game preset + Thread rules: what the game optimizer writes for one game (pick it in the list): process
-    // class, I/O and memory priority, EcoQoS, process boost, the hot-thread priorities, and the thread rules (match by
+    // class, I/O and memory priority, EcoQoS, process boost, and the thread rules (match by
     // thread description or start module; the first matching rule wins). Edits go into the page draft like every other
     // setting: Save writes presets.json and re-applies, Cancel drops them.
     public sealed partial class ThreadsPage
     {
-        private ComboBox _pick, _cls, _io, _mem, _eco, _pboost, _hot1, _hotN;
+        private ComboBox _pick, _cls, _io, _mem, _eco, _pboost;
         private TextBlock _clsDesc, _ioDesc, _memDesc;
         private StackPanel _rulesHost;
         private TextBlock _rulesEmpty;
@@ -38,7 +38,7 @@ namespace Grobyq.Pages
             pickRow.Children.Add(_pick);
             pickRow.Children.Add(builtin);
             pickRow.Height = 30;
-            card.Add(Ui.Row(L.T("Game"), L.T("Pick the game to tune. While the game threads optimizer runs, the process part below (class, I/O, memory, EcoQoS, boost) always applies - Normal means unchanged; the thread priorities and rules apply when Optimize threads is on."), pickRow));
+            card.Add(Ui.Row(L.T("Game"), L.T("Pick the game to tune. While the game threads optimizer runs, the process part below (class, I/O, memory, EcoQoS, boost) always applies - Normal means unchanged; the thread rules apply when Apply thread rules is on."), pickRow));
 
             _cls = Combo.New(200, new[] { new Opt("High", L.T("High")), new Opt("AboveNormal", L.T("Above normal")), new Opt("Normal", L.T("Normal")), new Opt("BelowNormal", L.T("Below normal")), new Opt("Idle", L.T("Idle")) });
             card.Add(ComboRow(L.T("Priority class"), Explain.Class("High"), _cls, out _clsDesc));
@@ -50,28 +50,24 @@ namespace Grobyq.Pages
             _eco = Combo.New(200, new[] { new Opt("Off", L.T("Off (HighQoS)")), new Opt("Keep", L.T("Keep Windows default")) });
             card.Add(ComboRow("EcoQoS", Explain.Eco, _eco, out dummy));
             _pboost = Combo.New(200, new[] { new Opt("Keep", L.T("Keep")), new Opt("Off", L.T("Off")), new Opt("On", L.T("On")) });
-            card.Add(ComboRow(L.T("Process priority boost"), Explain.ProcBoost, _pboost, out dummy));
-            _hot1 = Combo.New(200, PrioOpts());
-            card.Add(ComboRow(L.T("Hottest thread priority"), L.T("Priority for the busiest unnamed thread when no named rule matched (usually the main thread)."), _hot1, out dummy));
-            _hotN = Combo.New(200, PrioOpts());
-            card.Add(ComboRow(L.T("Other hot threads priority"), L.T("Priority for the remaining hot threads. keep = only the Ideal CPU is set."), _hotN, out dummy, false));
+            card.Add(ComboRow(L.T("Process priority boost"), Explain.ProcBoost, _pboost, out dummy, false));
 
             _cls.SelectionChanged += (s, e) => { _clsDesc.Text = Explain.Class(Combo.Val(_cls)); Edit(p => p.Class = Combo.Val(_cls)); };
             _io.SelectionChanged += (s, e) => { _ioDesc.Text = Explain.Io(Combo.Val(_io)); Edit(p => p.Io = Combo.Val(_io)); };
             _mem.SelectionChanged += (s, e) => { _memDesc.Text = Explain.Mem(Combo.Val(_mem)); Edit(p => p.Mem = Combo.Val(_mem)); };
             _eco.SelectionChanged += (s, e) => Edit(p => p.Eco = Combo.Val(_eco) == "Keep" ? "Keep" : "Off");
             _pboost.SelectionChanged += (s, e) => Edit(p => p.Boost = Combo.Val(_pboost));
-            _hot1.SelectionChanged += (s, e) => Edit(p => p.HotFirst = Combo.Val(_hot1));
-            _hotN.SelectionChanged += (s, e) => Edit(p => p.HotOthers = Combo.Val(_hotN));
 
             // ---- thread rules of the picked game ----
             Title(L.T("Thread rules"));
             var rc = Card();
-            var rdesc = rc.Add(Ui.Text(L.T("Top to bottom; the first matching rule wins for a thread. Match by thread description (GetThreadDescription) or by the module its start address is in. Applied when Optimize threads is on."), 8.75, "Dim"));
+            // 4.0.2: the "Optimize threads" switch (it used to sit alone under "Game optimizer") lives here, with what it turns on
+            rc.Add(SwitchRow(L.T("Apply thread rules"), L.T("The rules below set the picked game's thread priority, boost and, where a rule sets it, Ideal CPU. Off = no thread of the game is touched."), "DoThreads"));
+            var rdesc = rc.Add(Ui.Text(L.T("Top to bottom; the first matching rule wins for a thread. Match by thread description (GetThreadDescription) or by the module its start address is in. Applied when Apply thread rules is on."), 8.75, "Dim"));
             rdesc.Margin = new Thickness(0, 8, 0, 10);
             rc.Add(RulesHeader());
             _rulesHost = rc.Add(new StackPanel());
-            _rulesEmpty = rc.Add(Ui.Text(L.T("No rules: only the hot threads are tuned."), 9, "Faint"));
+            _rulesEmpty = rc.Add(Ui.Text(L.T("No rules: no thread of the game is touched."), 9, "Faint"));
             _rulesEmpty.Margin = new Thickness(2, 2, 0, 6);
             var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 10) };
             var add = Ui.Btn("+  " + L.T("Add rule"), "BtnOutline");
@@ -87,8 +83,7 @@ namespace Grobyq.Pages
             var k = new List<string> { "", "Idle", "Lowest", "BelowNormal", "Normal", "AboveNormal", "Highest" };
             var t = new List<string> { L.T("keep"), L.T("Idle"), L.T("Lowest"), L.T("Below normal"), L.T("Normal"), L.T("Above normal"), L.T("High (Highest)") };
             var o = Optimizer.Instance;
-            bool used = o != null && o.Eng.Presets != null && o.Eng.Presets.Values.Any(p => p.Threads.Any(r => string.Equals(r.Prio, "TimeCritical", StringComparison.OrdinalIgnoreCase))
-                || string.Equals(p.HotFirst, "TimeCritical", StringComparison.OrdinalIgnoreCase) || string.Equals(p.HotOthers, "TimeCritical", StringComparison.OrdinalIgnoreCase));
+            bool used = o != null && o.Eng.Presets != null && o.Eng.Presets.Values.Any(p => p.Threads.Any(r => string.Equals(r.Prio, "TimeCritical", StringComparison.OrdinalIgnoreCase)));
             if (Engine.AdvancedThreadMode || used) { k.Add("TimeCritical"); t.Add(L.T("Time critical (15) - Advanced")); }
             _prioKeys = k.ToArray(); _prioText = t.ToArray();
         }
@@ -154,7 +149,7 @@ namespace Grobyq.Pages
         {
             _cur = string.IsNullOrEmpty(exe) ? null : exe;
             bool on = _cur != null;
-            foreach (var c in new Control[] { _cls, _io, _mem, _eco, _pboost, _hot1, _hotN }) c.IsEnabled = on;
+            foreach (var c in new Control[] { _cls, _io, _mem, _eco, _pboost }) c.IsEnabled = on;
             if (!on) { _rulesHost.Children.Clear(); _rulesEmpty.Visibility = Visibility.Visible; return; }
             var p = Source(_cur);
             _pload = true;
@@ -163,7 +158,6 @@ namespace Grobyq.Pages
                 Combo.Select(_cls, p.Class); Combo.Select(_io, p.Io); Combo.Select(_mem, p.Mem);
                 Combo.Select(_eco, string.Equals(p.Eco, "Keep", StringComparison.OrdinalIgnoreCase) ? "Keep" : "Off");
                 Combo.Select(_pboost, p.Boost ?? "Keep");
-                Combo.Select(_hot1, p.HotFirst ?? ""); Combo.Select(_hotN, p.HotOthers ?? "");
                 _clsDesc.Text = Explain.Class(Combo.Val(_cls)); _ioDesc.Text = Explain.Io(Combo.Val(_io)); _memDesc.Text = Explain.Mem(Combo.Val(_mem));
             }
             finally { _pload = false; }

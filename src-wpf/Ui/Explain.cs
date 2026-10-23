@@ -104,17 +104,12 @@ namespace Grobyq
 
         public static string IdealCpu
         {
-            get { return L.T("Ideal CPU is a scheduler hint, not a pin: Windows prefers that LP but may run the thread elsewhere. auto spreads the matched and hottest threads over separate physical cores inside the game mask."); }
+            get { return L.T("Ideal CPU is a scheduler hint, not a pin: Windows prefers that LP but may run the thread elsewhere. auto spreads the matched threads over separate physical cores inside the game mask."); }
         }
 
         public static string Boost
         {
             get { return L.T("Priority boost = short dynamic boosts after waits (I/O completion, input, GUI). Off keeps the priority fixed; keep lets Windows decide."); }
-        }
-
-        public static string Hot
-        {
-            get { return L.T("Hot threads: after the named rules, the busiest unnamed threads (by QueryThreadCycleTime) get an Ideal CPU on free cores. The first one may also get a priority."); }
         }
 
         public static string Class(string c)

@@ -30,8 +30,8 @@ namespace Grobyq
         public string Mem = "Normal";      // VeryLow Low Medium BelowNormal Normal
         public string Eco = "Off";         // Off = EcoQoS off (HighQoS) | Keep = leave Windows default
         public string Boost = "Keep";      // process priority boost: Keep | On | Off
-        public string HotFirst = "AboveNormal";   // hottest unnamed thread (when no named rule hit)
-        public string HotOthers = "";             // the other hot threads
+        public string HotFirst = "AboveNormal";   // 4.0.2: hot threads removed - unused, kept so presets.json still
+        public string HotOthers = "";             //        round-trips through 4.0.1
         public bool Enabled = true;               // include this process in the "programs & services" bulk pass
         public List<ThreadRule> Threads = new List<ThreadRule>();
 
@@ -60,14 +60,16 @@ namespace Grobyq
             foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
             {
                 // Class = Normal by default: the game keeps the Windows priority. Raising the whole process to High can
-                // starve the very threads it waits on (DWM, Steam IPC); the win comes from the thread rules and the
-                // background layer, not from a blanket class bump. Raise it per game in the preset if a title needs it.
+                // starve the very threads it waits on (DWM, Steam IPC); any win has to come from the thread rules, not
+                // from a blanket class bump. Raise it per game in the preset if a title needs it.
                 var s2 = new Preset { Exe = exe, Class = "Normal", Io = "Normal", Mem = "Normal" };
                 // the frame's critical path - main thread (simulation) and render thread (submission to the driver) - one
-                // step above the game's own job workers and everything else at Normal: Highest = priority 10 in a Normal
-                // class, never TimeCritical. Each gets its own Ideal CPU. A/B it in CapFrameX (1% / 0.1% low), T2.
-                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Ideal = "auto", Prio = "Highest" });
-                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Ideal = "auto", Prio = "Highest" });
+                // step above normal-priority threads (Above normal). 4.0.2: no longer Highest and no Ideal CPU - two
+                // Highest threads can pre-empt each other and the Source 2 job workers, and a fixed Ideal CPU can fight the
+                // game's own scheduling; both are suspects for the 4.0.1 frame-time regression (T2, not isolated yet).
+                // Judge any change in CapFrameX (avg / 1% low), grobyq off vs on.
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*MainThrd*", Prio = "AboveNormal" });
+                s2.Threads.Add(new ThreadRule { Match = "desc", Pattern = "*D3D11RenderThread*", Prio = "AboveNormal" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "embree3.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "phonon.dll", Prio = "Lowest" });
                 s2.Threads.Add(new ThreadRule { Match = "module", Pattern = "video64.dll", Prio = "BelowNormal" });
@@ -91,35 +93,65 @@ namespace Grobyq
 
         public static Dictionary<string, string> DefaultBg()
         {
-            // steam.exe steps aside while the game runs (Idle, as in the AerialOS profile); restored when the game exits
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "ctfmon.exe", "Idle" }, { "textinputhost.exe", "Idle" }, { "discord.exe", "Normal" }, { "steam.exe", "Idle" } };
+            // 4.0.2: the user background list is gone (owner decision). ctfmon.exe and
+            // TextInputHost.exe moved into the system threads optimizer (bundled profile, [SETPROCESSESTOIDLEPRIORITY]).
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        // One-time update of an existing install (3.6.2): Steam joins the background list (Idle), and the old special
-        // "steamclient stays Normal" rule of the built-in cs2 / dota2 presets is removed. Runs once; returns log lines.
+        // One-time update (4.0.2): safe defaults for the frame-time fix. A saved cs2 / dota2 preset whose main / render rule
+        // still holds an old built-in value (4.0.1 Highest, 4.0.0 keep) goes to Above normal, and their "auto" Ideal CPU is dropped. The
+        // game core mask, the user background list and the game mode (close apps) are switched off - the background
+        // feature is removed; ctfmon / TextInputHost are handled by the system threads optimizer now. Runs once.
+        public static List<string> MigrateSafe402(Engine eng)
+        {
+            var log = new List<string>();
+            if (Settings.Get("Migrated402") == "1") return log;
+            bool any = false;
+            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
+            {
+                Preset p;
+                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
+                foreach (var r in p.Threads)
+                {
+                    if (!string.Equals(r.Match, "desc", StringComparison.OrdinalIgnoreCase)) continue;
+                    bool critical = string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase) || string.Equals(r.Pattern, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase);
+                    if (!critical) continue;
+                    // Highest = the 4.0.1 built-in value; keep (empty) = the 4.0.0 built-in render rule. Anything else is the user's.
+                    if (string.Equals(r.Prio, "Highest", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(r.Prio))
+                    { string was = string.IsNullOrEmpty(r.Prio) ? "keep" : r.Prio; r.Prio = "AboveNormal"; any = true; log.Add("[i] " + exe + ": " + r.Pattern + " " + was + " -> Above normal (4.0.2 safe default)"); }
+                    if (string.Equals(r.Ideal, "auto", StringComparison.OrdinalIgnoreCase)) { r.Ideal = ""; any = true; log.Add("[i] " + exe + ": " + r.Pattern + " Ideal CPU auto -> none (4.0.2 safe default)"); }
+                }
+            }
+            if (Settings.GetBool("DoMask")) { Settings.Set("DoMask", "0"); log.Add("[i] game core mask switched off (4.0.2 safe default; Affinity > Cores turns it back on)"); }
+            if (Settings.GetBool("DoBackground") || Settings.GetBool("CloseBackground") || Settings.BgProcs().Length > 0)
+                log.Add("[i] background processes removed (4.0.2): ctfmon.exe and TextInputHost.exe are in the system threads optimizer now");
+            Settings.Set("DoBackground", "0");
+            Settings.Set("CloseBackground", "0");
+            Settings.Set("BgProcs", "");
+            if (eng.BgClasses != null && eng.BgClasses.Count > 0) { eng.BgClasses.Clear(); any = true; }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
+            Settings.Set("Migrated402", "1");
+            return log;
+        }
+
+        // One-time update of an existing install (3.6.2): the old special "steamclient stays Normal" rule of the built-in
+        // cs2 / dota2 presets is removed. 3.6.2 also put steam.exe on the background list; 4.0.2 removed that list, so this
+        // update no longer touches it. Runs once; returns log lines.
         public static List<string> Migrate362(Engine eng)
         {
             var log = new List<string>();
             if (Settings.Get("Migrated362") == "1") return log;
-            var list = new List<string>(Settings.BgProcs());
-            if (!list.Any(x => string.Equals(x, "steam.exe", StringComparison.OrdinalIgnoreCase)))
-            {
-                list.Add("steam.exe");
-                Settings.Set("BgProcs", string.Join(" ", list));
-                log.Add("[i] steam.exe added to the background list (Idle while the game has focus)");
-            }
-            if (!eng.BgClasses.ContainsKey("steam.exe")) eng.BgClasses["steam.exe"] = "Idle";
+            bool any = false;
             foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
             {
                 Preset p;
-                if (!eng.Presets.TryGetValue(exe, out p)) continue;
+                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
                 int n = p.Threads.RemoveAll(r => string.Equals(r.Match, "module", StringComparison.OrdinalIgnoreCase)
                                               && string.Equals(r.Pattern, "steamclient*.dll", StringComparison.OrdinalIgnoreCase)
                                               && string.Equals(r.Prio, "Normal", StringComparison.OrdinalIgnoreCase));
-                if (n > 0) log.Add("[i] " + exe + ": special steamclient rule removed");
+                if (n > 0) { any = true; log.Add("[i] " + exe + ": special steamclient rule removed"); }
             }
-            string err = Save(eng.Presets, eng.BgClasses);
-            if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; }
+            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
             Settings.Set("Migrated362", "1");
             return log;
         }
@@ -143,31 +175,12 @@ namespace Grobyq
             return log;
         }
 
-        // One-time update (4.0.1): the built-in cs2 / dota2 preset raises the main and render threads to Highest. A saved
-        // preset whose rule still holds the OLD built-in value (MainThrd = Above normal, D3D11RenderThread = keep) follows;
-        // a rule the user set to anything else is left alone. Runs once.
+        // Retired (4.0.2): 4.0.1 raised the built-in main / render rules to Highest (a frame-time regression suspect);
+        // MigrateSafe402 now sets them to Above normal. Kept only to mark itself done, so it never runs again.
         public static List<string> MigrateHighThreads(Engine eng)
         {
-            var log = new List<string>();
-            if (Settings.Get("MigratedHighThreads") == "1") return log;
-            bool any = false;
-            foreach (var exe in new[] { "cs2.exe", "dota2.exe" })
-            {
-                Preset p;
-                if (!eng.Presets.TryGetValue(exe, out p) || p == null) continue;
-                foreach (var r in p.Threads)
-                {
-                    if (!string.Equals(r.Match, "desc", StringComparison.OrdinalIgnoreCase)) continue;
-                    bool main = string.Equals(r.Pattern, "*MainThrd*", StringComparison.OrdinalIgnoreCase) && string.Equals(r.Prio, "AboveNormal", StringComparison.OrdinalIgnoreCase);
-                    bool render = string.Equals(r.Pattern, "*D3D11RenderThread*", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(r.Prio);
-                    if (!main && !render) continue;
-                    r.Prio = "Highest"; any = true;
-                    log.Add("[i] " + exe + ": " + r.Pattern + " -> Highest (4.0.1 built-in preset; change it in the game preset if you want)");
-                }
-            }
-            if (any) { string err = Save(eng.Presets, eng.BgClasses); if (err.Length > 0) { log.Add("[!!] presets.json: " + err); return log; } }
-            Settings.Set("MigratedHighThreads", "1");
-            return log;
+            if (Settings.Get("MigratedHighThreads") != "1") Settings.Set("MigratedHighThreads", "1");
+            return new List<string>();
         }
 
         // ---------------- load / save ----------------
@@ -218,11 +231,8 @@ namespace Grobyq
                 { "maskDrop", Settings.Get("MaskDrop") },
                 { "maskIrq", GameMask.Mode },
                 { "maskCpu", SafeSig() },
-                { "topN", Settings.GetInt("TopN", 4) },
                 { "period", Settings.GetInt("Period", 2000) },
-                { "backgroundList", string.Join(" ", Settings.BgProcs()) },
                 { "affinity", eng.AffRules.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(k => k.Key, k => (object)k.Value) },
-                { "background", eng.BgClasses.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(k => k.Key, k => (object)k.Value) },
                 { "presets", eng.Presets.Values.OrderBy(p => p.Exe, StringComparer.OrdinalIgnoreCase).Select(PresetObj).ToList() },
                 { "layout", Settings.Get("LayoutTemplate") },
                 { "flags", FlagKeys.ToDictionary(k => k, k => (object)Settings.GetBool(k)) },
@@ -232,10 +242,10 @@ namespace Grobyq
 
         // Switches a profile carries. The two gated ones (protected priority, TimeCritical) are never switched on by a
         // load: they come back in LastImportWants and the page asks the user (per-session acknowledgment).
-        // "CloseBackground" (game mode) is deliberately NOT here: closing apps can lose unsaved work, so it stays a local,
-        // per-PC opt-in. A profile may carry "Close" marks on background chips; they stay inert until this PC's switch is on.
-        public static readonly string[] FlagKeys = { "DoThreads", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt", "DoBackground",
-                                                     "BgAffinity", "AllowProtectedPriority", "AdvancedThreadMode" };
+        // 4.0.2: the background list, its core pinning and the game mode are removed - old profiles' "DoBackground" /
+        // "BgAffinity" / "backgroundList" / "background" / "topN" entries are ignored on import.
+        public static readonly string[] FlagKeys = { "DoThreads", "DoAffRules", "ApplyAllPresets", "SystemThreadOpt",
+                                                     "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly HashSet<string> GatedFlags = new HashSet<string> { "AllowProtectedPriority", "AdvancedThreadMode" };
         public static readonly List<string> LastImportWants = new List<string>();
 
@@ -343,17 +353,6 @@ namespace Grobyq
                 Settings.SaveAffRules(eng.AffRules);
                 log.Add(string.Format("[IM] affinity rules: {0}", n));
             }
-            var bg = ReadMap(root, "background");
-            if (bg != null)
-            {
-                if (replace) eng.BgClasses.Clear();
-                foreach (var kv in bg)
-                {
-                    string exe = ExeName(kv.Key);
-                    if (exe.Length == 0 || Engine.Gate(exe, Engine.Op.Process, false) != null) continue;
-                    eng.BgClasses[exe] = kv.Value;
-                }
-            }
             if (root.ContainsKey("watchList"))
             {
                 string wl = string.Join(" ", S(root, "watchList").Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries).Select(ExeName).Where(x => x.Length > 0 && !Engine.IsAntiCheat(x)));
@@ -372,11 +371,7 @@ namespace Grobyq
                         + (foreign ? "  (grid edits skipped: made on " + sig + ", this PC is " + here + ")" : ""));
             }
             if (root.ContainsKey("maskIrq")) GameMask.SetMode(S(root, "maskIrq"));
-            if (root.ContainsKey("topN")) Settings.Set("TopN", S(root, "topN"));
             int per; if (root.ContainsKey("period") && int.TryParse(S(root, "period"), NumberStyles.Integer, CultureInfo.InvariantCulture, out per) && per >= 1000 && per <= 60000) Settings.Set("Period", per.ToString(CultureInfo.InvariantCulture));
-            if (root.ContainsKey("backgroundList"))
-                Settings.Set("BgProcs", string.Join(" ", S(root, "backgroundList").Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries)
-                                                       .Select(ExeName).Where(x => x.Length > 0 && Engine.Gate(x, Engine.Op.Process, false) == null)));
             if (root.ContainsKey("layout")) Settings.Set("LayoutTemplate", S(root, "layout"));
             LastImportWants.Clear();
             var flags = root.ContainsKey("flags") ? root["flags"] as Dictionary<string, object> : null;

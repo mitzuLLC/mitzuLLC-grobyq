@@ -25,11 +25,10 @@ namespace Grobyq
     {
         public string MaskName = "AllCores";
         public string BgMaskName;               // the rule background pinning is derived from (null = MaskName): base + edits, no interrupt drops
-        public int TopN = 4;
         public bool DoThreads = true;
         public bool Warmup = false;
-        public bool DoBackground = true;
-        public bool BgAffinity = true;
+        public bool DoBackground = false;       // 4.0.2: the user background list is removed - always off
+        public bool BgAffinity = false;
         public bool DoAffRules = true;
         public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
         public bool Game = true;                // the game threads optimizer is on: targets, affinity rules, the user's background list
@@ -163,12 +162,9 @@ namespace Grobyq
         private readonly Dictionary<int, ProcBefore> _procBefore = new Dictionary<int, ProcBefore>();
         private readonly Dictionary<string, ThrBefore> _thrBefore = new Dictionary<string, ThrBefore>();
 
-        // Session memory (cleared by Revert): the Ideal CPU each game thread was given - kept for the whole session, so a
-        // catch-up pass never moves the busiest threads to other cores - the unnamed hot threads picked, and for how many
-        // passes a picked one has been idle (after ~5 its slot is free again; its hint stays, harmless).
+        // Session memory (cleared by Revert): the Ideal CPU a thread rule gave a game thread - kept for the whole session,
+        // so a catch-up pass never moves it to another core. 4.0.2: the unnamed "hot threads" pass (TopN) is removed.
         private readonly Dictionary<string, uint> _ideal = new Dictionary<string, uint>();
-        private readonly HashSet<string> _hotPick = new HashSet<string>();
-        private readonly Dictionary<string, int> _hotIdle = new Dictionary<string, int>();
         private readonly HashSet<int> _gamePids = new HashSet<int>();
         public int GameThreadCount { get; private set; }     // game threads holding a grobyq setting right now
 
@@ -244,8 +240,6 @@ namespace Grobyq
             foreach (var k in _thrMeta.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrMeta.Remove(k);
             foreach (var k in _thrPrev.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _thrPrev.Remove(k);
             foreach (var k in _ideal.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _ideal.Remove(k);
-            _hotPick.RemoveWhere(k => k.StartsWith(pre, StringComparison.Ordinal));
-            foreach (var k in _hotIdle.Keys.Where(k => k.StartsWith(pre, StringComparison.Ordinal)).ToList()) _hotIdle.Remove(k);
             _gamePids.Remove(pid);
         }
 
@@ -544,7 +538,6 @@ namespace Grobyq
             string gate = Gate(target, Op.Process, ProtectedPriorityAllowed);
             if (gate != null) { AdviceOnce(log, "gate:" + target, gate); return log; }
             Native.EnableDebugPrivilege();
-            int topN = o.TopN <= 0 ? 4 : o.TopN;
             bool adv = AdvancedThreadMode;
 
             Topo topo = Topo.Live();
@@ -708,11 +701,11 @@ namespace Grobyq
                     if (!snap.Ok || snap.Rows.Count == 0) { AdviceOnce(log, "nothr:" + p.Id, "[!!] threads not accessible"); }
                     else
                     {
-                        var cand = Masks.IdealCandidates(topo, false, mask.Mask);   // CPU 0 is a valid Ideal CPU for hot threads (no reservation)
+                        var cand = Masks.IdealCandidates(topo, false, mask.Mask);   // CPU 0 is a valid Ideal CPU for a rule (no reservation)
                         var done = new HashSet<uint>();
                         string pre = p.Id + ":";
                         var alive = new HashSet<string>(snap.Rows.Select(r => pre + r.Tid));
-                        // LPs already given to live threads of this game: a new thread gets a free one (no two hot threads
+                        // LPs already given to live threads of this game: a new thread gets a free one (no two rule threads
                         // share an Ideal CPU while there are candidates left)
                         var usedLps = new HashSet<uint>(_ideal.Where(kv => alive.Contains(kv.Key)).Select(kv => kv.Value));
                         int ci = 0;
@@ -727,7 +720,7 @@ namespace Grobyq
                             return wrap;
                         };
 
-                        // threads that start in an anti-cheat module are never touched (named rules and hot threads)
+                        // threads that start in an anti-cheat module are never touched by a thread rule
                         foreach (var ac in snap.Rows.Select(r => ModuleOf(r.Sym)).Where(IsAntiCheat).Distinct(StringComparer.OrdinalIgnoreCase))
                             AdviceOnce(log, "acmod:" + target + ac, string.Format("[THR] anti-cheat target skipped: {0} (threads in {1})", ac, target));
                         if (preset != null && preset.Threads.Count > 0)
@@ -793,57 +786,10 @@ namespace Grobyq
                             }
                         }
 
-                        // unnamed hot threads need a KNOWN, non-anti-cheat start module (fail closed: an unreadable module
-                        // list - VM_READ stripped - could hide an injected anti-cheat DLL)
+                        // a thread needs a KNOWN, non-anti-cheat start module (fail closed: an unreadable module list -
+                        // VM_READ stripped - could hide an injected anti-cheat DLL)
                         if (snap.Rows.Count > 0 && snap.Rows.All(r => ModuleOf(r.Sym).Length == 0))
-                            AdviceOnce(log, "nomods:" + target, string.Format("[THR] {0}: thread modules unreadable - thread rules and hot threads skipped (an anti-cheat module cannot be ruled out); process priority and cores still apply", target));
-
-                        // Hot threads, sticky for the session: a picked thread keeps its Ideal CPU and priority; only threads
-                        // without one can be picked, up to the hot-thread count. A picked thread that stays idle for ~5
-                        // passes frees its slot (its hint stays - harmless), so the pick follows menu -> match without
-                        // reshuffling the threads that are busy right now.
-                        ulong top = snap.Rows.Count > 0 ? snap.Rows[0].Rate : 0;
-                        foreach (var k in _hotPick.Where(x => x.StartsWith(pre, StringComparison.Ordinal)).ToList())
-                        {
-                            if (!alive.Contains(k)) { _hotPick.Remove(k); _hotIdle.Remove(k); continue; }
-                            var row = snap.Rows.First(r => pre + r.Tid == k);
-                            bool idle = top > 0 && row.Rate < top / 100;
-                            int n2; _hotIdle.TryGetValue(k, out n2);
-                            n2 = idle ? n2 + 1 : 0;
-                            if (n2 >= 5) { _hotPick.Remove(k); _hotIdle.Remove(k); } else _hotIdle[k] = n2;
-                        }
-                        int picked = _hotPick.Count(x => x.StartsWith(pre, StringComparison.Ordinal));
-                        int slots = Math.Max(1, cand.Count - done.Count);
-                        int effTopN = Math.Min(topN, slots);
-                        if (effTopN < topN)
-                            AdviceOnce(log, "topn:" + target, string.Format("[i ] Hot threads {0} -> {1}: only {2} candidate cores, {3} taken by named rules", topN, effTopN, cand.Count, done.Count));
-                        int room = Math.Max(0, effTopN - picked);
-                        var hot = room == 0 ? new List<ThreadRow>() :
-                            snap.Rows.Where(r => !done.Contains(r.Tid) && SafeThread(r) && !_hotPick.Contains(pre + r.Tid) && !_ideal.ContainsKey(pre + r.Tid) && r.Rate > 0).Take(room).ToList();
-                        bool first = done.Count == 0 && picked == 0;
-                        foreach (var r in hot)
-                        {
-                            IntPtr ht = Native.OpenThreadOf(p.Id, r.Tid);
-                            if (ht == IntPtr.Zero) continue;
-                            try
-                            {
-                                string tkey2 = pre + r.Tid;
-                                var tb = ThreadBaseline(tkey2, ht);
-                                uint lp = nextLp();
-                                Native.SetThreadIdealProcessor(ht, lp);
-                                _ideal[tkey2] = lp;
-                                _hotPick.Add(tkey2); _hotIdle[tkey2] = 0;
-                                string ptxt = "-";
-                                string want = first ? (preset != null ? preset.HotFirst : "AboveNormal") : (preset != null ? preset.HotOthers : "");
-                                int wp;
-                                if (ThreadPrio(want, adv, out wp)) { MarkPrio(tb, ht); if (Native.GetThreadPriority(ht) == wp || Native.SetThreadPriority(ht, wp)) ptxt = want; }
-                                first = false;
-                                report.CycleFallbackTids.Add((int)r.Tid);
-                                log.Add(string.Format("[TH] {0,-24} TID {1,-7} {2,12} c/s  idealCPU={3} prio={4} {5}", "(by cycles)", r.Tid, r.Rate, lp, ptxt, r.Sym));
-                            }
-                            finally { Native.CloseHandle(ht); }
-                        }
-                        nThread += _hotPick.Count(x => x.StartsWith(pre, StringComparison.Ordinal));
+                            AdviceOnce(log, "nomods:" + target, string.Format("[THR] {0}: thread modules unreadable - thread rules skipped (an anti-cheat module cannot be ruled out); process priority and cores still apply", target));
                     }
                 }
             }
@@ -947,7 +893,7 @@ namespace Grobyq
                 string gate = Gate(b, Op.Process, ProtectedPriorityAllowed);
                 if (gate != null) { AdviceOnce(log, "gate:bg:" + bn, gate); continue; }
                 if (targets.Contains(b) || targets.Contains(bn + ".exe")) continue;   // a game in the background list is still the game
-                if (IsClose(b)) continue;                                             // marked "Close": the game-mode close path handles it, not the lowering layer
+                if (user && IsClose(b)) continue;                                     // marked "Close": the game-mode close path handles it, not the lowering layer
                 foreach (var bp in Procs(b))
                 {
                     int lvl, err;
@@ -961,8 +907,10 @@ namespace Grobyq
                         var bb = _procBefore[bp.Id];
                         bb.BgClass = bb.BgIo = bb.BgMem = true;
                         string clsB = "BelowNormal";
-                        if (BgClasses.ContainsKey(b)) clsB = BgClasses[b];
-                        else if (BgClasses.ContainsKey(bn + ".exe")) clsB = BgClasses[bn + ".exe"];
+                        // 4.0.2: a user class (old presets.json "background") counts only for the user list - it can no longer
+                        // override the built-in profile's class for ctfmon / TextInputHost
+                        if (user && BgClasses.ContainsKey(b)) clsB = BgClasses[b];
+                        else if (user && BgClasses.ContainsKey(bn + ".exe")) clsB = BgClasses[bn + ".exe"];
                         else if (SystemBg.ContainsKey(b)) clsB = SystemBg[b];
                         uint clsV;
                         if (!PRIO.TryGetValue(clsB, out clsV) || string.Equals(clsB, "Realtime", StringComparison.OrdinalIgnoreCase) || string.Equals(clsB, "High", StringComparison.OrdinalIgnoreCase))
@@ -1494,7 +1442,7 @@ namespace Grobyq
             }
             _appliedGame.Clear(); _appliedBg.Clear(); _sysPids.Clear();
             _procBefore.Clear(); _thrBefore.Clear(); _born.Clear();
-            _ideal.Clear(); _hotPick.Clear(); _hotIdle.Clear(); _gamePids.Clear();
+            _ideal.Clear(); _gamePids.Clear();
             SysProcCount = 0; SysThreadCount = 0; GameThreadCount = 0;
             _presetTidCount.Clear();   // Lever-3 guard: a disable must force the next enable to re-apply imported presets
             BgOn = false; LastThreads = 0; LastBg = 0; LiveTarget = "";
@@ -1517,8 +1465,6 @@ namespace Grobyq
             foreach (var k in _gamePids.ToList()) if (!alive.Contains(k)) _gamePids.Remove(k);
             Func<string, bool> deadKey = k => { int c = k.IndexOf(':'), pp; return c > 0 && int.TryParse(k.Substring(0, c), out pp) && !alive.Contains(pp); };
             foreach (var k in _ideal.Keys.Where(deadKey).ToList()) _ideal.Remove(k);
-            _hotPick.RemoveWhere(k => deadKey(k));
-            foreach (var k in _hotIdle.Keys.Where(deadKey).ToList()) _hotIdle.Remove(k);
             foreach (var k in _procBefore.Keys.ToList()) if (!alive.Contains(k)) _procBefore.Remove(k);
             foreach (var k in _born.Keys.ToList()) if (!alive.Contains(k)) _born.Remove(k);
             foreach (var k in _presetTidCount.Keys.ToList()) if (!alive.Contains(k)) _presetTidCount.Remove(k);
