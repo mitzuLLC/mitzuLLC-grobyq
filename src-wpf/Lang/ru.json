@@ -1366,5 +1366,18 @@
  "grobyq as after a fresh install: both optimizers off and every change back, settings, games and the thread reference to the first-run defaults, autostart off. The language, the license and the Affinity backups stay.": "grobyq как после чистой установки: оба оптимизатора выключены, все изменения возвращены, настройки, игры и эталон потоков — как при первом запуске, автозапуск выключен. Язык, лицензия и резервные копии «Привязки» остаются.",
  "grobyq is back to its factory settings.": "grobyq возвращён к заводским настройкам.",
  "no built-in reference": "нет встроенного эталона",
- "your rules": "свои правила"
+ "your rules": "свои правила",
+ "Game default (grobyq does not touch it)": "Как ставит игра (grobyq не трогает)",
+ "No test: the preset's priorities apply.": "Теста нет: действуют приоритеты пресета.",
+ "Other priorities for the three frame threads of CS2 and Dota 2, without launch options. A pick applies at once while the game threads optimizer runs and stays until Turn the test off; the log notes every pick with its time - match it to your CapFrameX runs. A launch option such as -mainthreadpriority is overridden unless the row is set to Game default.": "Другие приоритеты для трёх потоков кадра CS2 и Dota 2 без параметров запуска. Выбор применяется сразу, пока работает оптимизатор игровых потоков, и держится до «Выключить тест»; журнал отмечает каждый выбор со временем — сверяй его с прогонами CapFrameX. Параметр запуска вроде -mainthreadpriority перекрывается, если в строке не выбрано «Как ставит игра».",
+ "Preset: {0}": "Пресет: {0}",
+ "Priority test": "Тест приоритетов",
+ "Reference: {0}": "Эталон: {0}",
+ "Test on: {0}": "Тест включён: {0}",
+ "Time critical": "Критичный по времени",
+ "Time critical (15) is the top of the normal priority range: on its core the thread runs before every thread that is not real-time, the input and audio helpers of other programs included. It is not a real-time level - grobyq never sets one - and it stays a test until you turn the test off. Use it for a test run?": "«Критичный по времени» (15) — верх обычного диапазона приоритетов: на своём ядре поток идёт раньше всех потоков, кроме потоков реального времени, включая вспомогательные потоки ввода и звука других программ. Это не уровень реального времени — его grobyq не ставит никогда — и он остаётся тестом, пока ты не выключишь тест. Использовать для тестового прогона?",
+ "Turn the test off": "Выключить тест",
+ "not touched": "не меняется",
+ "priority test": "тест приоритетов",
+ "the game threads optimizer is off": "оптимизатор игровых потоков выключен"
 }

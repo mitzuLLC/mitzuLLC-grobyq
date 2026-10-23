@@ -82,6 +82,7 @@ namespace Grobyq
                 case "[OK]": return LogLevel.Good;
                 case "[IRQ]": return LogLevel.Irq;
                 case "[TH]":
+                case "[AB]":                       // 4.0.5: priority test picks and the levels the game had
                 case "[PR]":
                 case "[>>]":
                 case "[<<]": return LogLevel.Accent;

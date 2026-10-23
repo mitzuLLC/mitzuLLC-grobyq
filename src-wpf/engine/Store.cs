@@ -18,6 +18,7 @@ namespace Grobyq
         public string Boost = "";          // "" keep | Off | On
         public string Tid = "";            // "" all matches | first | last | N : which matching thread the rule touches (creation order approx by TID)
         public bool Enabled = true;
+        public bool Test;                  // 4.0.5: a priority-test rule (PrioTest) - built per pass, never stored in presets.json
         public ThreadRule Clone() { return (ThreadRule)MemberwiseClone(); }
 
         // 4.0.3: the match kind follows the pattern (Threads > Thread rules has no desc / module choice any more): a file

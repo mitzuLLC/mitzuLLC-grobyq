@@ -255,6 +255,20 @@ namespace Grobyq
                 log.Add("      thread rules: " + d.Count + " built-in cs2 rules (MainThrd Highest, render + GlobPool Above normal), " + ThreadNotes.Count + " thread captions");
                 return prios && boost && match && kinds && reference && notes;
             });
+            chk("priority test", () =>
+            {
+                // 4.0.5: the test rules take only the listed levels - never a real-time one, the job pool stops at Highest;
+                // Game default wins the thread without a priority; Time critical runs for a test rule only (a preset value
+                // without Advanced thread mode is still coerced to Highest)
+                var r = PrioTest.RulesFor("TimeCritical", "Highest", "keep");
+                bool rules = r.Count == 3 && r.All(x => x.Test) && r[0].Pattern == "*MainThrd*" && r[0].Prio == "TimeCritical" && r[1].Prio == "Highest" && r[2].Pattern == "*GlobPool*" && r[2].Prio == "";
+                bool guard = PrioTest.RulesFor("Realtime", "TimeCritical", "TimeCritical").Count == 1 && PrioTest.RulesFor("", "", "").Count == 0;
+                int tc, co;
+                bool levels = Engine.ThreadPrio("TimeCritical", true, out tc) && tc == 15 && Engine.ThreadPrio("TimeCritical", false, out co) && co == 2;
+                bool names = Engine.LevelName(15) == "TimeCritical" && Engine.LevelName(2) == "Highest" && Engine.LevelName(-15) == "Idle" && Engine.LevelName(6) == "6";
+                log.Add("      priority test: " + string.Join(", ", PrioTest.Slots.Select(s => s.Name)) + " - " + (PrioTest.Active ? "on: " + PrioTest.Summary() : "off"));
+                return rules && guard && levels && names;
+            });
             chk("cleaner", () => Cleaner.Items().Count > 0);
             chk("hwid", () => GrobLic.Hwid().Length > 0);
             chk("license url", () => Licensing.ListUrl.StartsWith("https://", StringComparison.Ordinal) &&

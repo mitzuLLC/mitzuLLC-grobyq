@@ -243,6 +243,7 @@ namespace Grobyq.Pages
                 o.ApplyNow();                                   // in a session: restore, then apply the reference afresh
             }
             LoadPreset(exe);
+            FillTest();                                         // the test rows name the preset's levels
             UpdateSaveBar(L.T("Reference restored."));
         }
 

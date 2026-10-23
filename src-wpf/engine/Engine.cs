@@ -33,6 +33,8 @@ namespace Grobyq
         public bool DoMask = true;              // game process: core mask (affinity + default CPU sets)
         public bool Game = true;                // the game threads optimizer is on: targets, affinity rules, the user's background list
         public bool Sys = false;                // the system threads optimizer is on: the built-in profile + its background list
+        public List<ThreadRule> TestRules;      // 4.0.5: the priority test (PrioTest.Rules), in front of the preset's rules for cs2 / dota2
+        public int TestStamp;                   // changes with every test pick: the [AB] lines are written once per pick and thread
     }
 
     public sealed class Engine
@@ -53,6 +55,23 @@ namespace Grobyq
         public const int TimeCriticalValue = 15;
 
         public static bool AdvancedThreadMode { get { return Settings.GetBool("AdvancedThreadMode"); } }
+
+        // A thread priority level as GetThreadPriority returns it, by name for the log ("Highest", "TimeCritical"); a value
+        // only a real-time-class process can have stays a number.
+        public static string LevelName(int v)
+        {
+            switch (v)
+            {
+                case -15: return "Idle";
+                case -2: return "Lowest";
+                case -1: return "BelowNormal";
+                case 0: return "Normal";
+                case 1: return "AboveNormal";
+                case 2: return "Highest";
+                case TimeCriticalValue: return "TimeCritical";
+            }
+            return v.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         // Thread priority value for a stored key. "TimeCritical" -> 15 only when advanced, otherwise Highest (+2).
         public static bool ThreadPrio(string key, bool advanced, out int value)
@@ -723,11 +742,16 @@ namespace Grobyq
                         // threads that start in an anti-cheat module are never touched by a thread rule
                         foreach (var ac in snap.Rows.Select(r => ModuleOf(r.Sym)).Where(IsAntiCheat).Distinct(StringComparer.OrdinalIgnoreCase))
                             AdviceOnce(log, "acmod:" + target + ac, string.Format("[THR] anti-cheat target skipped: {0} (threads in {1})", ac, target));
-                        if (preset != null && preset.Threads.Count > 0)
+                        // 4.0.5: the priority test's rules go first (first match wins): for cs2 / dota2 they take the main thread,
+                        // render thread or job pool from the preset's rule while a test level is picked on Threads
+                        var rules = new List<ThreadRule>();
+                        if (o.TestRules != null && o.TestRules.Count > 0 && PrioTest.ForGame(target)) rules.AddRange(o.TestRules);
+                        if (preset != null) rules.AddRange(preset.Threads);
+                        if (rules.Count > 0)
                         {
-                            foreach (var rule in preset.Threads.Where(x => x.Enabled && !string.IsNullOrEmpty(x.Pattern)))
+                            foreach (var rule in rules.Where(x => x.Enabled && !string.IsNullOrEmpty(x.Pattern)))
                             {
-                                string rname = (rule.Match == "module" ? "mod:" : "") + rule.Pattern;
+                                string rname = (rule.Test ? "test:" : "") + (rule.Match == "module" ? "mod:" : "") + rule.Pattern;
                                 if (IsAntiCheat(rule.Pattern)) { AdviceOnce(log, "acrule:" + target + rname, "[THR] anti-cheat target skipped: " + rule.Pattern); continue; }
                                 var hits = snap.Rows.Where(r => RuleHits(rule, r.Desc, r.Sym) && SafeThread(r)).ToList();
                                 if (hits.Count == 0) { AdviceOnce(log, "nomatch:" + target + rname, string.Format("[TH] rule {0} - no match", rname)); continue; }
@@ -764,12 +788,20 @@ namespace Grobyq
                                                 acts.Add("idealCPU=" + fixedLp + " (fixed)");
                                             }
                                         }
+                                        // the level the thread has before this rule acts: the game's own (or a launch option's)
+                                        // on the first pass, after a restore and on threads created later - A/B evidence in the log
+                                        int was = Native.GetThreadPriority(ht);
+                                        if (rule.Test)
+                                            AdviceOnce(log, "ab:" + o.TestStamp + ":" + tkey2, string.Format("[AB] {0} TID {1}: game {2} -> {3}",
+                                                rule.Pattern, r.Tid, LevelName(was), string.IsNullOrEmpty(rule.Prio) ? "kept (game default)" : rule.Prio + " (priority test)"));
                                         int tp;
-                                        if (ThreadPrio(rule.Prio, adv, out tp))
+                                        // Time critical (15) runs for a test rule (picked and confirmed on Threads); in a preset only with
+                                        // Advanced thread mode, otherwise it is coerced to Highest
+                                        if (ThreadPrio(rule.Prio, adv || rule.Test, out tp))
                                         {
                                             MarkPrio(tb, ht);
-                                            if (Native.GetThreadPriority(ht) != tp)
-                                                acts.Add(Native.SetThreadPriority(ht, tp) ? "prio=" + rule.Prio + (tp == TimeCriticalValue ? " (15, Advanced)" : "") : "prio=FAIL");
+                                            if (was != tp)
+                                                acts.Add(Native.SetThreadPriority(ht, tp) ? "prio=" + LevelName(was) + "->" + LevelName(tp) : "prio=FAIL");
                                         }
                                         bool wantOff = string.Equals(rule.Boost, "Off", StringComparison.OrdinalIgnoreCase), wantOn = string.Equals(rule.Boost, "On", StringComparison.OrdinalIgnoreCase);
                                         if (wantOff || wantOn)

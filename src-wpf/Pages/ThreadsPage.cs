@@ -73,8 +73,9 @@ namespace Grobyq.Pages
             _addGame.Height = 28; _addGame.Padding = new Thickness(12, 0, 12, 0); _addGame.Margin = new Thickness(4, 0, 0, 6);
             _addGame.Click += (s, e) => AddGame();
 
-            // ---- the picked game's reference (ThreadsPage.Preset.cs) ----
+            // ---- the picked game's reference (ThreadsPage.Preset.cs), then the priority test (ThreadsPage.Test.cs) ----
             BuildPreset();
+            BuildTest();
 
             // ---- factory reset: the whole app, the same as Settings > Reset to factory settings ----
             var rs = Card();
@@ -321,6 +322,7 @@ namespace Grobyq.Pages
             finally { _loading = false; }
             FillGames();
             FillPick();
+            FillTest();                                     // the test rows name the saved preset's levels
         }
 
         // ------------------------------------------------------------------ state
@@ -350,18 +352,21 @@ namespace Grobyq.Pages
                 if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // ctfmon / TextInputHost
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
+            UpdateTestState();                              // "the game threads optimizer is off" follows the switch
         }
 
-        // "built-in reference" when every running game runs the reference of this version, else "your rules"
+        // "priority test" while a test level runs on a Source 2 game; else "built-in reference" when every running game runs
+        // the reference of this version, else "your rules"
         private static string RunningRules(Optimizer o, string live)
         {
-            bool all = true;
+            bool all = true, test = false;
             foreach (var exe in (live ?? "").Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries))
             {
+                if (PrioTest.ForGame(exe) && PrioTest.Active) test = true;
                 Preset p;
-                if (o.Eng.Presets == null || !o.Eng.Presets.TryGetValue(exe, out p) || !Store.IsBuiltin(exe, p)) { all = false; break; }
+                if (o.Eng.Presets == null || !o.Eng.Presets.TryGetValue(exe, out p) || !Store.IsBuiltin(exe, p)) all = false;
             }
-            return all ? L.T("built-in reference") : L.T("your rules");
+            return test ? L.T("priority test") : all ? L.T("built-in reference") : L.T("your rules");
         }
 
         private static void Stat(Ellipse dot, TextBlock text, string brush, string value)

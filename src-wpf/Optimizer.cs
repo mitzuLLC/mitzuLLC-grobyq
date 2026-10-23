@@ -176,6 +176,7 @@ namespace Grobyq
                     Preset p; Eng.Presets.TryGetValue(t, out p);
                     if (p != null) AppLog.Add(string.Format("[i] {0}: {1} ({2} thread rules)", t, Store.IsBuiltin(t, p) ? "built-in reference" : Store.HasBuiltin(t) ? "your rules (differ from the built-in reference)" : "your rules", p.Threads.Count(r => r.Enabled && !string.IsNullOrEmpty(r.Pattern))));
                 }
+                if (PrioTest.Active) AppLog.Add("[AB] priority test on (cs2 / dota2): " + PrioTest.Summary());
             }
             Evaluate(true);
         }
@@ -209,6 +210,18 @@ namespace Grobyq
             if (was) { AppLog.Add("=== OPTIMIZERS OFF ==="); QueueRevert(); }
             Queue(() => Eng.RelaunchClosed());                        // game mode off too: reopen anything it closed (no-op if nothing)
             Evaluate(false);
+        }
+
+        // Threads > Priority test: a pick was stored (PrioTest). The log notes it with the whole variant (the journal adds the
+        // time - match it to a CapFrameX run); a running session restores every baseline and applies afresh, so Game default
+        // really gives the game's own level back.
+        private int _testStamp;
+        public void TestChanged(string what)
+        {
+            _testStamp++;
+            AppLog.Add("[AB] priority test: " + what + "  =>  " + (PrioTest.Active ? PrioTest.Summary() : "off, the preset applies"));
+            if (!_game) AppLog.Add("[i] the game threads optimizer is off: the priority test applies once it is on and a game runs");
+            ApplyNow();
         }
 
         // Factory reset, the engine part (OptUi.FactoryReset clears the settings key around it): both switches off and every
@@ -274,6 +287,7 @@ namespace Grobyq
             {
                 _session = true;
                 AppLog.Add("[>>] " + now + " running - " + Which() + " optimization on");
+                if (_game && PrioTest.Active) AppLog.Add("[AB] priority test on (cs2 / dota2): " + PrioTest.Summary());
                 QueueApply(true);
             }
             else if (!want && _session)
@@ -318,6 +332,8 @@ namespace Grobyq
             BgMaskName = GameMask.ManualRule(SafeTopo()),
             DoMask = Brand.AffinityOpen && Settings.GetBool("DoMask"),            // 4.0.3: Affinity closed - its parts are not applied
             DoThreads = true,                                       // 4.0.4: the thread rules are the game preset, not a switch
+            TestRules = PrioTest.Rules(),                           // 4.0.5: Threads > Priority test, in front of the preset's rules
+            TestStamp = _testStamp,
             DoBackground = false,                                   // 4.0.2: the user background list is removed
             BgAffinity = false,
             DoAffRules = Brand.AffinityOpen && Settings.GetBool("DoAffRules"),
