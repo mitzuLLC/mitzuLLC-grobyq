@@ -112,6 +112,7 @@ namespace Grobyq
         public string Path;             // {Token}\segment\... - wildcards allowed in any segment
         public int Days;
         public string Pattern = "*";
+        public bool Top;                // only the files directly in the folder
         public string[] Owners;         // null = the app's processes; empty = none (old logs and crash dumps are never open)
     }
 
@@ -151,6 +152,13 @@ namespace Grobyq
             "ESEA", "PunkBuster", "GameGuard", "nProtect", "XIGNCODE", "XIGNCODE3", "AntiCheatExpert", "mhyprot"
         };
 
+        // Files never deleted from a guarded folder, whatever folder they are found in (sign-in, settings, Telegram key).
+        public static readonly HashSet<string> ProtectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "key_datas", "Cookies", "Cookies-journal", "Login Data", "Login Data-journal", "Login Data For Account", "Web Data", "Web Data-journal",
+            "Local State", "Preferences", "Secure Preferences", "prefs", "loginusers.vdf", "config.vdf", "localconfig.vdf", "settings.json"
+        };
+
         // ---------------------------------------------------------------- catalog
         private static string[] Split(string owners) { return string.IsNullOrEmpty(owners) ? new string[0] : owners.Split('|'); }
         private static AppSpec Cr(string path) { return new AppSpec { Kind = "cr", Path = path }; }
@@ -158,6 +166,7 @@ namespace Grobyq
         private static AppSpec Dir(string path) { return new AppSpec { Kind = "dir", Path = path }; }
         private static AppSpec Dump(string path) { return new AppSpec { Kind = "dir", Path = path, Owners = new string[0] }; }
         private static AppSpec Logs(string path, int days = 7, string pattern = "*") { return new AppSpec { Kind = "logs", Path = path, Days = days, Pattern = pattern, Owners = new string[0] }; }
+        private static AppSpec LogsTop(string path, string pattern) { return new AppSpec { Kind = "logs", Path = path, Days = 7, Pattern = pattern, Top = true, Owners = new string[0] }; }
 
         private static AppDef App(string key, string name, string group, string owners, string desc, params AppSpec[] specs)
         {
@@ -194,7 +203,7 @@ namespace Grobyq
                 Dir(@"{PF}\Ubisoft\Ubisoft Game Launcher\cache\http*"), Dir(@"{PF}\Ubisoft\Ubisoft Game Launcher\cache\assets"), Logs(@"{PF}\Ubisoft\Ubisoft Game Launcher\logs")));
             c.Add(App("gog", "GOG GALAXY", "games", "GalaxyClient", launcher,
                 Cr(@"{ProgramData}\GOG.com\Galaxy\webcache\common"), Dump(@"{ProgramData}\GOG.com\Galaxy\crashdumps"), Logs(@"{ProgramData}\GOG.com\Galaxy\logs")));
-            c.Add(App("overwolf", "Overwolf", "games", "Overwolf|OverwolfBrowser", web, Cr(@"{Local}\Overwolf\BrowserCache"), Logs(@"{Local}\Overwolf\Log*")));
+            c.Add(App("overwolf", "Overwolf", "games", "Overwolf|OverwolfBrowser", web, Cr(@"{Local}\Overwolf\BrowserCache"), Logs(@"{Local}\Overwolf\Log"), Logs(@"{Local}\Overwolf\Logs")));
 
             // ---- chat and calls
             c.Add(App("discord", "Discord", "chat", "Discord|DiscordPTB|DiscordCanary|DiscordDevelopment", chat,
@@ -230,11 +239,11 @@ namespace Grobyq
             // ---- drivers and devices
             c.Add(App("nvidiaapp", "NVIDIA app", "devices", "NVIDIA app", L.T("Built-in browser caches of the NVIDIA app, the overlay and GeForce Experience, old logs. Driver settings stay."),
                 Cr(@"{Local}\NVIDIA Corporation\NVIDIA App\CefCache"), CrBy(@"{Local}\NVIDIA Corporation\NVIDIA Overlay\CefCache", "NVIDIA Overlay"),
-                CrBy(@"{Local}\NVIDIA Corporation\GeForce Experience\CefCache", "NVIDIA GeForce Experience|NVIDIA Share"), Logs(@"{ProgramData}\NVIDIA Corporation\NVIDIA App", 7, "*.log*")));
+                CrBy(@"{Local}\NVIDIA Corporation\GeForce Experience\CefCache", "NVIDIA GeForce Experience|NVIDIA Share"), LogsTop(@"{ProgramData}\NVIDIA Corporation\NVIDIA App", "*.log")));
             c.Add(App("amd", "AMD Software", "devices", "RadeonSoftware", L.T("Built-in browser cache and old logs of AMD Software: Adrenalin Edition. Driver settings stay."),
                 Dir(@"{Local}\AMD\RadeonSoftware\Cache"), Cr(@"{Local}\AMD\RadeonSoftware\QtWebEngine\Default"), Logs(@"{Local}\AMD\CN", 7, "*.log")));
             c.Add(App("razer", "Razer Synapse", "devices", "Razer Synapse|Razer Synapse 3|RazerAppEngine", device,
-                Logs(@"{Local}\Razer\*\Log*"), Logs(@"{ProgramData}\Razer\*\Log*"), Cr(@"{Local}\Razer\RazerAppEngine\User Data")));
+                Logs(@"{Local}\Razer\*\Log"), Logs(@"{Local}\Razer\*\Logs"), Logs(@"{ProgramData}\Razer\*\Log"), Logs(@"{ProgramData}\Razer\*\Logs"), Cr(@"{Local}\Razer\RazerAppEngine\User Data")));
             c.Add(App("ghub", "Logitech G HUB", "devices", "lghub", device, Cr(@"{Roaming}\G HUB")));
             c.Add(App("steelseries", "SteelSeries GG", "devices", "SteelSeriesGG|SteelSeriesGGClient|SteelSeriesEngine", device,
                 Cr(@"{Roaming}\SteelSeries-Engine-*-Client"), Logs(@"{ProgramData}\SteelSeries\SteelSeries Engine*\Logs"), Logs(@"{ProgramData}\SteelSeries\GG\logs")));
@@ -415,7 +424,7 @@ namespace Grobyq
                     if (s.Kind == "cr")
                         foreach (var p in ChromiumCaches(dir)) AddPart(res, new CleanPart { Path = p, Owners = owners, App = d.Name, Guard = true, Probe = true });
                     else
-                        AddPart(res, new CleanPart { Path = dir, Owners = owners, App = d.Name, Guard = true, MinAgeDays = s.Kind == "logs" ? s.Days : 0, Pattern = s.Pattern ?? "*" });
+                        AddPart(res, new CleanPart { Path = dir, Owners = owners, App = d.Name, Guard = true, MinAgeDays = s.Kind == "logs" ? s.Days : 0, Pattern = s.Pattern ?? "*", TopOnly = s.Top });
                 }
             }
             return res;

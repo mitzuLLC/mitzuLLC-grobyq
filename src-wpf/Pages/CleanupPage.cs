@@ -336,12 +336,16 @@ namespace Grobyq.Pages
             var th = new Thread(() =>
             {
                 var summary = new List<string>();
-                Cleaner.RunTool("dism.exe", args, line =>
+                try
                 {
-                    if (line.StartsWith("[", StringComparison.Ordinal) && line.Contains("%")) return;       // progress bar lines
-                    if (line.IndexOf(":", StringComparison.Ordinal) > 0 || line.Contains("operation")) { lock (summary) summary.Add(line); }
-                    AppLog.Add("[DISM] " + line);
-                }, 2 * 60 * 60 * 1000);
+                    Cleaner.RunTool("dism.exe", args, line =>
+                    {
+                        if (line.StartsWith("[", StringComparison.Ordinal) && line.Contains("%")) return;       // progress bar lines
+                        if (line.IndexOf(":", StringComparison.Ordinal) > 0 || line.Contains("operation")) { lock (summary) summary.Add(line); }
+                        AppLog.Add("[DISM] " + line);
+                    }, 2 * 60 * 60 * 1000);
+                }
+                catch (Exception ex) { AppLog.Add("[!!] dism: " + ex.Message); }
                 Post(() =>
                 {
                     SetBusy(false);
@@ -364,7 +368,8 @@ namespace Grobyq.Pages
             SetBusy(true);
             var th = new Thread(() =>
             {
-                string err = Cleaner.RunDiskCleanup(keys, s => AppLog.Add(s));
+                string err;
+                try { err = Cleaner.RunDiskCleanup(keys, s => AppLog.Add(s)); } catch (Exception ex) { err = ex.Message; }
                 Post(() => { SetBusy(false); AppLog.Add(err.Length == 0 ? "[CL] Disk Cleanup finished" : "[!!] Disk Cleanup: " + err); });
             }) { IsBackground = true };
             th.Start();
@@ -377,7 +382,7 @@ namespace Grobyq.Pages
             SetBusy(true);
             var th = new Thread(() =>
             {
-                Cleaner.ClearEventLogs(s => AppLog.Add(s));
+                try { Cleaner.ClearEventLogs(s => AppLog.Add(s)); } catch (Exception ex) { AppLog.Add("[!!] event logs: " + ex.Message); }
                 Post(() => SetBusy(false));
             }) { IsBackground = true };
             th.Start();

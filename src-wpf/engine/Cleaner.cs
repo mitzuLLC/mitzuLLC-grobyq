@@ -212,7 +212,7 @@ namespace Grobyq
                 {
                     if (File.Exists(root)) { var fi = new FileInfo(root); if (part.MinAgeDays == 0 || fi.LastWriteTime < cutoff) Count(it, fi); continue; }
                     if (!Directory.Exists(root)) continue;
-                    foreach (var f in Walk(root, part.Pattern, part.TopOnly))
+                    foreach (var f in Walk(root, part.Pattern, part.TopOnly, part.Guard))
                     {
                         try
                         {
@@ -238,26 +238,40 @@ namespace Grobyq
             if (t > it.Newest) it.Newest = t;
         }
 
-        // Directory walk that survives access-denied folders and never follows junctions.
-        private static IEnumerable<string> Walk(string root, string pattern, bool topOnly)
+        // Directory walk that survives access-denied folders and never enters a junction / symbolic link - the root
+        // included, checked again when each folder is entered. Guarded (app) parts also skip protected folder and file
+        // names at any depth (AppCaches.Deny / ProtectedFiles).
+        private static IEnumerable<string> Walk(string root, string pattern, bool topOnly, bool guard = false)
         {
             var stack = new Stack<string>();
             stack.Push(root);
             while (stack.Count > 0)
             {
                 string dir = stack.Pop();
+                if (IsLink(dir)) continue;
                 string[] files = null, dirs = null;
                 try { files = Directory.GetFiles(dir, pattern); } catch { }
-                if (files != null) foreach (var f in files) yield return f;
+                if (files != null)
+                    foreach (var f in files)
+                    {
+                        if (guard && AppCaches.ProtectedFiles.Contains(Path.GetFileName(f))) continue;
+                        yield return f;
+                    }
                 if (topOnly) continue;
                 try { dirs = Directory.GetDirectories(dir); } catch { }
                 if (dirs == null) continue;
                 foreach (var d in dirs)
                 {
-                    try { if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) continue; } catch { continue; }
+                    if (guard && AppCaches.Deny.Contains(Path.GetFileName(d))) continue;
+                    if (IsLink(d)) continue;
                     stack.Push(d);
                 }
             }
+        }
+
+        private static bool IsLink(string dir)
+        {
+            try { return (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; } catch { return true; }
         }
 
         // ---------------------------------------------------------------- clean
@@ -324,10 +338,11 @@ namespace Grobyq
                         continue;
                     }
                     if (!Directory.Exists(root)) continue;
-                    foreach (var f in Walk(root, part.Pattern, part.TopOnly).ToList())
+                    foreach (var f in Walk(root, part.Pattern, part.TopOnly, part.Guard))
                     {
                         try
                         {
+                            if (IsLink(Path.GetDirectoryName(f))) { locked++; continue; }
                             var fi = new FileInfo(f);
                             if (part.MinAgeDays > 0 && fi.LastWriteTime >= cutoff) continue;
                             long len = fi.Length;
@@ -337,7 +352,7 @@ namespace Grobyq
                         }
                         catch { locked++; }
                     }
-                    if (!part.TopOnly) RemoveEmptyDirs(root);
+                    if (!part.TopOnly && !IsLink(root)) RemoveEmptyDirs(root, part.Guard);
                 }
             }
             finally
@@ -357,7 +372,7 @@ namespace Grobyq
             return freed;
         }
 
-        private static void RemoveEmptyDirs(string root)
+        private static void RemoveEmptyDirs(string root, bool guard)
         {
             try
             {
@@ -365,8 +380,8 @@ namespace Grobyq
                 {
                     try
                     {
-                        if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) continue;
-                        RemoveEmptyDirs(d);
+                        if (IsLink(d) || (guard && AppCaches.Deny.Contains(Path.GetFileName(d)))) continue;
+                        RemoveEmptyDirs(d, guard);
                         if (!Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d);
                     }
                     catch { }

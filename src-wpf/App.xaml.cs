@@ -278,7 +278,7 @@ namespace Grobyq
                 Directory.CreateDirectory(env.Steam);
                 env.SteamLibs = CleanEnv.SteamLibraries(env.Steam);
                 F(@"Roaming\discord\Cache\Cache_Data\f_1"); F(@"Roaming\discord\Code Cache\js\a"); F(@"Roaming\discord\Local Storage\leveldb\1.log"); F(@"Roaming\discord\Network\Cookies");
-                F(@"Roaming\discord\Preferences"); F(@"Roaming\discord\Local State");
+                F(@"Roaming\discord\Preferences"); F(@"Roaming\discord\Local State"); F(@"Roaming\discord\Cache\Local Storage\deep"); F(@"Roaming\discord\Cache\Cookies");
                 F(@"Local\Spotify\Data\a\1"); F(@"Local\Spotify\Storage\b\song"); F(@"Roaming\Spotify\prefs");
                 F(@"Steam\appcache\httpcache\a"); F(@"Steam\config\loginusers.vdf"); F(@"Steam\userdata\1\remote\save");
                 F(@"Roaming\Telegram Desktop\tdata\user_data\cache\x"); F(@"Roaming\Telegram Desktop\tdata\key_datas");
@@ -295,11 +295,13 @@ namespace Grobyq
                     Cleaner.SetRunning(new string[0]);
                     var rows = Cleaner.AppItems(cat);
                     rows.Add(new CleanItem { Key = "drivers", Title = "drivers", Parts = () => AppCaches.DriverParts(env) });
+                    if (link) rows.Add(new CleanItem { Key = "linkroot", Title = "link root", Roots = () => new System.Collections.Generic.List<string> { Path.Combine(S, @"Roaming\Slack\Cache") } });
                     foreach (var it in rows) Cleaner.Clean(it, s => { });
                     bool gone = !E(@"Roaming\discord\Cache\Cache_Data\f_1") && !E(@"Roaming\discord\Code Cache\js\a") && !E(@"Local\Spotify\Data\a\1") && !E(@"Steam\appcache\httpcache\a")
                              && !E(@"Roaming\Telegram Desktop\tdata\user_data\cache\x") && !E(@"Roaming\SomeApp\Cache\x") && !E(@"C\NVIDIA\DisplayDriver\1\setup.exe");
                     bool kept = E(@"Roaming\discord\Local Storage\leveldb\1.log") && E(@"Roaming\discord\Network\Cookies") && E(@"Local\Spotify\Storage\b\song") && E(@"Steam\config\loginusers.vdf")
-                             && E(@"Steam\userdata\1\remote\save") && E(@"Roaming\Telegram Desktop\tdata\key_datas") && E(@"Roaming\FACEIT\Cache\x") && E(@"Roaming\SomeApp\Local Storage\leveldb\t") && E(@"elsewhere\keep.txt");
+                             && E(@"Steam\userdata\1\remote\save") && E(@"Roaming\Telegram Desktop\tdata\key_datas") && E(@"Roaming\FACEIT\Cache\x") && E(@"Roaming\SomeApp\Local Storage\leveldb\t") && E(@"elsewhere\keep.txt")
+                             && E(@"Roaming\discord\Cache\Local Storage\deep") && E(@"Roaming\discord\Cache\Cookies");
                     bool prefs = File.ReadAllText(Path.Combine(S, @"Roaming\Spotify\prefs")).Contains("storage.size=1024");
                     bool guard = !AppCaches.Safe(env.Roaming, env, out why) && !AppCaches.Safe(Path.Combine(env.Roaming, "discord"), env, out why)
                               && !AppCaches.Safe(Path.Combine(env.Roaming, "discord", "Local Storage"), env, out why) && !AppCaches.Safe(@"C:\Windows\System32", env, out why)
