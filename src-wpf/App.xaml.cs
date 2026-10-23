@@ -279,7 +279,7 @@ namespace Grobyq
             {
                 L.Load("ru");
                 var pages = new System.Windows.Controls.UserControl[] { new Pages.HomePage(), new Pages.ThreadsPage(), new Pages.AffinityPage(), new Pages.MaintenancePage(), new Pages.CleanupPage(), new Pages.SettingsPage(), new Pages.AboutPage(), new Pages.JournalPage() };
-                return pages.Length == 7;
+                return pages.Length == 8;                      // 4.0.3: + the Affinity maintenance page
             });
             // JIT every method of the assembly: an obfuscation layer that emits invalid IL fails here, at build time,
             // instead of in a code path the checks above never reach (InvalidProgramException on first call).
