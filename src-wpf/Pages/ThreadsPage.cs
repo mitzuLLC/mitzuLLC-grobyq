@@ -52,7 +52,7 @@ namespace Grobyq.Pages
                 UpdateState();
             };
             top.Add(OptimizerRow(L.T("System threads optimizer"),
-                L.T("The built-in system profile while a game runs: lower thread priorities for system processes, NVIDIA, Steam and Discord (most at the lowest, Idle), ctfmon and TextInputHost entirely at the lowest. Priority boost stays where a thread has to wake on time (audio, input, composition) and is off only for busy background apps. Fully reversible."),
+                L.T("The built-in system profile 5.0.0 while a game runs: lower thread priorities for system processes, NVIDIA, Steam, Discord and grobyq itself - the busy threads at the lowest (Idle), the rest a step or two below normal. Priority boost stays where a thread has to wake on time (audio, input, composition) and is off only for busy background apps. Thread priorities only: no process is lowered as a whole, nothing is frozen or closed. Fully reversible."),
                 _sysSw, out _sysDot, out _sysStat, false));
 
             // ---- games ----
@@ -348,7 +348,7 @@ namespace Grobyq.Pages
             else
             {
                 string t = L.F("threads: {0}   ·   processes: {1}", o.Eng.SysThreadCount, o.Eng.SysProcCount);
-                if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // ctfmon / TextInputHost
+                if (o.Eng.BgOn) t += "   ·   " + L.F("background: {0}", o.Eng.LastBg);   // the user background list only (off since 4.0.2; the system profile lowers no process)
                 Stat(_sysDot, _sysStat, "Ok", t);
             }
         }

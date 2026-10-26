@@ -15,7 +15,7 @@ namespace Grobyq
         private const string OldRoot = @"Software\grobPC";
 
         // 4.0.2: the user background list is removed (owner decision); kept empty so an old stored
-        // list or a settings reset brings nothing back. ctfmon / TextInputHost live in the system threads optimizer.
+        // list or a settings reset brings nothing back. ctfmon / TextInputHost are thread rules of the system profile.
         public static readonly string DefaultBgProcs = "";
 
         private static bool _migrated;

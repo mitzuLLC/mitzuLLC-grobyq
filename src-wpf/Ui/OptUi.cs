@@ -15,15 +15,16 @@ namespace Grobyq
         }
 
         // false = declined, nothing changed. 4.0.4: the system optimizer always runs its whole built-in profile, and that
-        // profile includes protected system processes (dwm, svchost, audiodg, csrss, winlogon, explorer, sihost) - so the
-        // first switch-on asks once (turn on / cancel). The yes is kept ("AllowProtectedPriority"); a factory reset asks again.
+        // profile includes protected system processes (5.0.0: dwm, svchost, winlogon, explorer, sihost, conhost, and grobyq
+        // itself) - so the first switch-on asks once (turn on / cancel). The yes is kept ("AllowProtectedPriority"); a factory
+        // reset asks again.
         public static bool System(bool on, Window owner)
         {
             var o = Optimizer.Instance;
             if (o == null) return false;
             if (on && !Settings.GetBool("AllowProtectedPriority"))
             {
-                int a = Dlg.Show(owner, L.T("The system threads optimizer lowers the thread priorities of system processes too (dwm, svchost, audiodg, csrss, winlogon, explorer) while a game runs. Priority and boost only: nothing is frozen or killed, and everything goes back when the game closes.\n\nTurn it on?"),
+                int a = Dlg.Show(owner, L.T("The system threads optimizer lowers the thread priorities of system processes too (dwm, svchost, winlogon, explorer, sihost, conhost) while a game runs. Thread priority and boost only: no process is lowered as a whole, nothing is frozen or killed, and everything goes back when the game closes.\n\nTurn it on?"),
                                  false, L.T("Turn on"), L.T("Cancel"));
                 if (a != 0) return false;
                 Settings.Set("AllowProtectedPriority", "1");

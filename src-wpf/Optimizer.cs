@@ -13,7 +13,8 @@ namespace Grobyq
     //
     //   Game threads optimizer   - the game preset: the built-in reference (or the user's edit of it) - process part and
     //                              thread rules - plus, once Affinity reopens, the parts switched on there.
-    //   System threads optimizer - the built-in thread profile (system processes, NVIDIA / Steam / Discord...), as written.
+    //   System threads optimizer - the built-in thread profile 5.0.0 (system processes, NVIDIA / Steam / Discord...), as
+    //                              written: thread priority and boost only, never a process class.
     //
     // Session = a chosen game is running (alt-tab changes nothing). Session start: everything switched on is applied once.
     // During the session a catch-up pass every 2 s handles only what is new (threads created later, e.g. on map load): the
@@ -190,8 +191,11 @@ namespace Grobyq
             if (on)
             {
                 int boostOff = Eng.SystemPresets.Values.Count(p => string.Equals(p.Boost, "Off", StringComparison.OrdinalIgnoreCase));
-                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  ({0} process profiles, {1} background processes, process boost off for {2} background apps; priority and boost only, anti-cheats skipped{3}; applied while a game runs)",
-                    Eng.SystemPresets.Count, Eng.SystemBg.Count, boostOff, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped"));
+                int rules = Eng.SystemPresets.Values.Sum(p => p.Threads.Count);
+                AppLog.Add(string.Format("=== SYSTEM THREADS OPTIMIZER ON ===  (profile 5.0.0: {0} processes, {1} thread rules, process boost off for {2} background apps; thread priority and boost only, no process class, anti-cheats skipped{3}; applied while a game runs)",
+                    Eng.SystemPresets.Count, rules, boostOff, Engine.ProtectedPriorityAllowed ? "" : ", protected system processes skipped"));
+                // lines of the profile grobyq does not act on (a value that is not a priority, an empty rule, a legacy list)
+                foreach (var n in Eng.SystemProfileNotes) AppLog.Add("[i] profile: " + n);
             }
             else AppLog.Add("=== SYSTEM THREADS OPTIMIZER OFF ===");
             Evaluate(true);

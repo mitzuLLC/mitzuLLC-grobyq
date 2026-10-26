@@ -144,20 +144,22 @@ namespace Grobyq
 
         public Dictionary<string, string> AffRules = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // Built-in system profile (embedded, see ThreadIni.LoadBundled). Applied by the "System thread optimization"
-        // switch, never written to presets.json and not listed in the preset picker. Priority only.
+        // The built-in system profile 5.0.0 (embedded, see ThreadIni.LoadBundled): thread priority / boost rules per process
+        // and the process-boost-off list. Applied by the system threads optimizer while a game runs, never written to
+        // presets.json and not listed in the preset picker. Thread priority and boost only: no process class comes from it
+        // (4.1.0: the old profile's background lists are gone).
         public Dictionary<string, Preset> SystemPresets = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);
-        // ...and its background lists ([PROCESSESTOSUSPEND] / [SETPROCESSESTOIDLEPRIORITY] -> Idle while the game runs).
-        public Dictionary<string, string> SystemBg = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // What the profile holds but grobyq does not act on (ThreadIni.Result.Ignored): logged once when switched on.
+        public List<string> SystemProfileNotes = new List<string>();
 
         public void LoadSystemProfile(bool on)
         {
             lock (_gate)
             {
                 _presetTidCount.Clear();   // rules changed -> next cycle must re-apply (see InvalidatePresetApplyCache)
-                if (!on) { SystemPresets.Clear(); SystemBg.Clear(); return; }
+                if (!on) { SystemPresets.Clear(); SystemProfileNotes = new List<string>(); return; }
                 var r = ThreadIni.LoadBundled();
-                SystemPresets = r.Presets; SystemBg = r.BgClasses;
+                SystemPresets = r.Presets; SystemProfileNotes = r.Ignored;
             }
         }
 
@@ -329,7 +331,15 @@ namespace Grobyq
         public static bool RuleHits(ThreadRule rule, string desc, string sym)
         {
             if (rule == null || !rule.Enabled || string.IsNullOrEmpty(rule.Pattern)) return false;
-            if (string.Equals(rule.Match, "module", StringComparison.OrdinalIgnoreCase)) return Wild(ModuleOf(sym), rule.Pattern);
+            if (string.Equals(rule.Match, "module", StringComparison.OrdinalIgnoreCase))
+            {
+                // the module file ("SHCore.dll"); a pattern without an extension ("SHCore", "ntdll") matches the file name
+                // without its extension too (system profile 5.0.0 writes one such line)
+                string m = ModuleOf(sym);
+                if (Wild(m, rule.Pattern)) return true;
+                int dot = m.LastIndexOf('.');
+                return dot > 0 && rule.Pattern.IndexOf('.') < 0 && Wild(m.Substring(0, dot), rule.Pattern);
+            }
             return Wild(desc, rule.Pattern);
         }
 
@@ -886,14 +896,14 @@ namespace Grobyq
         }
 
         // ---------------- background layer ----------------
-        // user = the user's background list (game optimizer), sys = the built-in profile's list (system optimizer): one pass,
-        // one baseline per process even when a process is on both lists.
-        public List<string> BgApply(bool bgAffinity, string maskName, bool user, bool sys) { lock (_gate) return BgApplyCore(bgAffinity, maskName, user, sys); }
-        private List<string> BgApplyCore(bool bgAffinity, string maskName, bool user, bool sys)
+        // The user's background list (game optimizer; removed from the UI in 4.0.2, the list is kept empty). 4.1.0: the
+        // system profile has no background list any more - the system optimizer never changes a process class.
+        public List<string> BgApply(bool bgAffinity, string maskName, bool user) { lock (_gate) return BgApplyCore(bgAffinity, maskName, user); }
+        private List<string> BgApplyCore(bool bgAffinity, string maskName, bool user)
         {
             var log = new List<string>();
-            if (Targets == null) return log;
-            var list = (user ? Settings.BgProcs() : new string[0]).Concat(sys ? SystemBg.Keys.ToArray() : new string[0]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (Targets == null || !user) return log;
+            var list = Settings.BgProcs().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (list.Length == 0) return log;
 
             Topo topo = Topo.Live();
@@ -924,11 +934,9 @@ namespace Grobyq
                         var bb = _procBefore[bp.Id];
                         bb.BgClass = bb.BgIo = bb.BgMem = true;
                         string clsB = "BelowNormal";
-                        // 4.0.2: a user class (old presets.json "background") counts only for the user list - it can no longer
-                        // override the built-in profile's class for ctfmon / TextInputHost
-                        if (user && BgClasses.ContainsKey(b)) clsB = BgClasses[b];
-                        else if (user && BgClasses.ContainsKey(bn + ".exe")) clsB = BgClasses[bn + ".exe"];
-                        else if (SystemBg.ContainsKey(b)) clsB = SystemBg[b];
+                        // a user class (old presets.json "background") for a user-list entry
+                        if (BgClasses.ContainsKey(b)) clsB = BgClasses[b];
+                        else if (BgClasses.ContainsKey(bn + ".exe")) clsB = BgClasses[bn + ".exe"];
                         uint clsV;
                         if (!PRIO.TryGetValue(clsB, out clsV) || string.Equals(clsB, "Realtime", StringComparison.OrdinalIgnoreCase) || string.Equals(clsB, "High", StringComparison.OrdinalIgnoreCase))
                         { clsB = "BelowNormal"; clsV = PRIO[clsB]; }
@@ -1026,10 +1034,10 @@ namespace Grobyq
                 return log;
             }
 
-            // background: the user's list (game optimizer + its switch) and the built-in profile's list (system optimizer).
-            // ApplyAll runs only inside a game session (Optimizer): a chosen game is running.
-            bool userBg = o.Game && o.DoBackground, sysBg = o.Sys && SystemBg.Count > 0;
-            if (userBg || sysBg) foreach (var l in BgApplyCore(userBg && o.BgAffinity, o.BgMaskName ?? o.MaskName, userBg, sysBg)) log.Add(l);
+            // background: the user's list (game optimizer + its switch; off since 4.0.2). The system profile has no background
+            // list (4.1.0). ApplyAll runs only inside a game session (Optimizer): a chosen game is running.
+            bool userBg = o.Game && o.DoBackground;
+            if (userBg) foreach (var l in BgApplyCore(o.BgAffinity, o.BgMaskName ?? o.MaskName, true)) log.Add(l);
             else if (BgOn) foreach (var l in BgRelease()) log.Add(l);
             return log;
         }
@@ -1380,9 +1388,10 @@ namespace Grobyq
                     if (Gate(t, Op.Process, false) != null) continue;          // never a protected / anti-cheat exe
                     foreach (var p in ByName(t)) ids.Add(p.Id);
                 }
-                // background lists (user + built-in profile): only processes still at a class the background layer sets
-                // (Idle / Below normal) - evidence grobyq lowered them; anything else is left as it is
-                foreach (var b in Settings.BgProcs().Concat(SystemBg.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+                // the user background list: only processes still at a class the background layer sets (Idle / Below normal)
+                // - evidence grobyq lowered them; anything else is left as it is. The system profile sets thread priorities
+                // only (4.1.0): a fresh engine has no baseline to put those back to, the running grobyq restores them exactly.
+                foreach (var b in Settings.BgProcs().Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (Gate(b, Op.Process, false) != null || Targets.Any(t => string.Equals(t, b, StringComparison.OrdinalIgnoreCase))) continue;
                     foreach (var p in ByName(b))

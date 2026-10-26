@@ -12,8 +12,8 @@
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Version>4.0.9</Version>
-    <FileVersion>4.0.9.0</FileVersion>
+    <Version>4.1.0</Version>
+    <FileVersion>4.1.0.0</FileVersion>
     <Product>grobyq by mitzu LLC</Product>
     <Company>mitzu LLC</Company>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -34,7 +34,8 @@
     <!-- interface languages: English is the key, these map English -> translation (L.Load reads lang.<code>.json) -->
     <EmbeddedResource Include="Lang\ru.json" LogicalName="lang.ru.json" />
     <EmbeddedResource Include="Lang\uk.json" LogicalName="lang.uk.json" />
-    <!-- startup animation (94 JPEG frames, "GQSP") and the built-in system thread profile (System thread optimizer) -->
+    <!-- startup animation (94 JPEG frames, "GQSP") and the built-in system thread profile 5.0.0 (System threads optimizer;
+         thread priority and boost only - ThreadIni.cs) -->
     <EmbeddedResource Include="Assets\splash.bin" LogicalName="splash.bin" />
     <EmbeddedResource Include="Assets\system-threads.txt" LogicalName="system-threads.txt" />
   </ItemGroup>

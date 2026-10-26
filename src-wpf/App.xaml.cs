@@ -158,7 +158,8 @@ namespace Grobyq
             {
                 var eng = new Engine(Settings.WatchList());
                 eng.AffRules = Settings.LoadAffRules();
-                eng.LoadSystemProfile(Settings.GetBool("SystemThreadOpt"));    // its background list is part of the recovery
+                // 4.1.0: the system profile sets thread priorities only - a fresh engine has no baseline to put them back to
+                // (the running grobyq restores them exactly); nothing of it is needed here
                 Console.WriteLine();
                 Console.WriteLine("  " + Brand.Name + " by mitzu LLC - removing optimization");
                 Console.WriteLine();
@@ -349,18 +350,38 @@ namespace Grobyq
             chk("tray menu", () => { L.Load("ru"); var m = new TrayMenu(); m.Sync("ARMED", "", true, false); return m.Content != null; });
             chk("system profile", () =>
             {
-                // 4.0.2: only the two text-input processes step aside. 4.0.4: every thread of both at Idle (catch-all last);
+                // 4.1.0 = profile 5.0.0, applied as written: thread priority and boost only. Its facts, checked against the
+                // embedded text: no legacy code (300 / 200) survives as a rule, no background list, no game sections;
                 // process boost off only for busy background apps - audio, composition, input and system services keep it;
-                // no game sections (the game presets own the games)
+                // ctfmon / TextInputHost at Below normal (no longer Idle, no catch-all); DWM at Below normal / Lowest with
+                // the NVIDIA worker's last thread at Idle; grobyq lowers itself; the one extension-less module pattern
+                // (explorer: SHCore) matches SHCore.dll through Engine.RuleHits. The legacy codes themselves are refused
+                // by the parser (a line with 300 / 200 / 15 is skipped, not mapped).
                 var r = ThreadIni.LoadBundled();
-                int boostOff = r.Presets.Values.Count(p => p.Boost == "Off");
-                Func<string, bool> keeps = exe => { Preset p; return !r.Presets.TryGetValue(exe, out p) || (p.Boost != "Off" && p.Threads.All(t => t.Boost != "Off")); };
-                Func<string, bool> idle = exe => { Preset p; return r.Presets.TryGetValue(exe, out p) && p.Threads.Count > 0 && p.Threads.All(t => t.Prio == "Idle") && p.Threads[p.Threads.Count - 1].Pattern == "*"; };
-                bool boost = keeps("dwm.exe") && keeps("audiodg.exe") && keeps("svchost.exe") && keeps("winlogon.exe") && keeps("csrss.exe") && keeps("ctfmon.exe") && boostOff >= 10;
-                bool text = idle("ctfmon.exe") && idle("TextInputHost.exe");
-                bool games = !r.Presets.ContainsKey("cs2.exe") && !r.Presets.ContainsKey("dota2.exe");
-                log.Add("      system profile: " + r.Presets.Count + " processes, " + r.BgClasses.Count + " background, process boost off for " + boostOff);
-                return r.Presets.Count > 10 && r.BgClasses.Count == 2 && r.BgClasses.ContainsKey("ctfmon.exe") && r.BgClasses.ContainsKey("TextInputHost.exe") && boost && text && games;
+                Func<string, Preset> P = exe => { Preset p; return r.Presets.TryGetValue(exe, out p) ? p : null; };
+                Func<string, string, ThreadRule> R = (exe, pat) => { var p = P(exe); return p == null ? null : p.Threads.FirstOrDefault(t => string.Equals(t.Pattern, pat, StringComparison.OrdinalIgnoreCase)); };
+                Func<string, bool> keeps = exe => { var p = P(exe); return p == null || (p.Boost != "Off" && p.Threads.All(t => t.Boost != "Off")); };
+                bool clean = r.Rows.All(x => (x.SourceValue != "300" && x.SourceValue != "200") || x.Skipped) && r.Presets.Values.All(p => p.Threads.All(t => t.Prio.Length > 0 || t.Boost == "Off"));
+                bool boost = keeps("dwm.exe") && keeps("audiodg.exe") && keeps("svchost.exe") && keeps("winlogon.exe") && keeps("csrss.exe") && keeps("ctfmon.exe") && r.BoostOff >= 10 && r.BoostOff < 30;
+                bool games = !r.Presets.ContainsKey("cs2.exe") && !r.Presets.ContainsKey("dota2.exe") && !r.Presets.ContainsKey("VALORANT-Win64-Shipping.exe");
+                var ctf = R("ctfmon.exe", "ctfmon.exe"); var tih = R("TextInputHost.exe", "TextInputHost.exe");
+                bool text = ctf != null && ctf.Prio == "BelowNormal" && tih != null && tih.Prio == "BelowNormal"
+                         && P("ctfmon.exe").Threads.All(t => t.Pattern != "*") && P("TextInputHost.exe").Threads.All(t => t.Pattern != "*");
+                var dwmNv = R("dwm.exe", "nvwgf2umx.dll"); var dwmCore = R("dwm.exe", "dwmcore.dll");
+                bool dwm = dwmNv != null && dwmNv.Prio == "Idle" && dwmNv.Tid == "last" && dwmCore != null && dwmCore.Prio == "BelowNormal";
+                var self = R("grobyq.exe", "grobyq.exe");
+                bool own = self != null && self.Prio == "Idle" && self.Boost == "Off" && Engine.IsProtected("grobyq.exe");
+                var sh = R("explorer.exe", "SHCore");
+                bool shcore = sh != null && sh.Match == "module" && sh.Prio == "BelowNormal" && sh.Boost == "Off"
+                           && Engine.RuleHits(sh, "", "SHCore.dll+0x1A2B") && !Engine.RuleHits(sh, "", "SHCoreX.dll+0x1A2B") && !Engine.RuleHits(sh, "", "ntdll.dll+0x10");
+                bool parser = ThreadIni.MapPrio("300") == "" && ThreadIni.MapPrio("200") == "" && ThreadIni.MapPrio("15") == "" && ThreadIni.MapPrio("-15") == "Idle" && ThreadIni.MapPrio("0") == "Normal";
+                var probe = ThreadIni.Parse("[SETPROCESSESTOIDLEPRIORITY]\nctfmon\n[x]\nmodule=a.dll, 300\nmodule=b.dll, -1\nmodule=c.exe, tid=0\nmodule=d.dll, disableboost\n");
+                bool legacy = probe.Presets.Count == 1 && probe.Presets["x.exe"].Threads.Count == 2 && probe.Presets["x.exe"].Threads[0].Pattern == "b.dll"
+                           && probe.Presets["x.exe"].Threads[1].Boost == "Off" && probe.Presets["x.exe"].Threads[1].Prio == "" && probe.Ignored.Count == 3;
+                int skipped = r.Rows.Count(x => x.Skipped);
+                log.Add("      system profile: 5.0.0, " + r.Presets.Count + " processes, " + r.Rules + " thread rules, process boost off for " + r.BoostOff + ", " + skipped + " line(s) skipped, no background list");
+                foreach (var n in r.Ignored) log.Add("        - " + n);
+                return r.Presets.Count >= 30 && r.Rules >= 100 && clean && boost && games && text && dwm && own && shcore && parser && legacy;
             });
             chk("pages", () =>
             {

@@ -1,3 +1,9 @@
+; grobyq - built-in system thread profile 5.0.0 (grobyq 4.1.0). Supplied by the owner (mitzu) on 2026-10-26 and embedded
+; as written. Applied by the system threads optimizer while a chosen game runs; everything goes back when it closes.
+; Thread priority and priority boost only: no thread is frozen or killed, no process class is changed (ThreadIni.cs).
+;   -15 Idle · -2 Lowest · -1 Below normal · 0 Normal · disableboost = no dynamic boost · tid=last / tid=0 = that thread only
+; Lines below this block are the owner's file. ----------------------------------------------------------------------
+
 ; If you are not confident in your knowledge, do not make any changes to this configuration
 ; The developer is not responsible for the consequences of your actions and changes in the settings
 ; Carefully read the comments on the parameters indicated by the sign " ; "
@@ -5,23 +11,6 @@
 [SETTINGS]
 sleep=10000
 
-; 4.0.4 (grobyq): no game sections. The game threads optimizer runs the built-in game presets (the reference on
-; Threads), and this profile never touches a watched game anyway.
-
-; 4.0.2 (grobyq): the background lists are cut down (owner decision) - Discord, browsers, launchers and peripheral
-; software are no longer lowered while the game runs. Only the two text-input processes step aside. grobyq never
-; suspends: an entry is lowered to Idle priority while the game runs and restored when it exits. 4.0.4: every thread
-; of both goes to Idle too (sections [textinputhost] and [ctfmon] below).
-[SETPROCESSESTOIDLEPRIORITY]
-ctfmon
-TextInputHost
-
-; Process priority boost off (SetProcessPriorityBoost): every thread of these processes keeps its base priority.
-; 4.0.4 boost policy (owner decision). A boost is the short lift Windows gives a thread that wakes for an event - input,
-; I/O completion, a window message - and it decays every quantum. It stays wherever a thread has to wake on time:
-; audio (audiodg, the audio service in svchost), composition and input (dwm, csrss, ctfmon), system services
-; (svchost, winlogon). Their priorities below are unchanged. It is off only for background apps that do bulk work
-; while you play: from a normal base, a boosted thread of theirs reaches the game threads' level for a moment.
 [DISABLEBOOST]
 explorer
 gamingservices
@@ -39,262 +28,158 @@ WmiPrvSE
 dllhost
 RuntimeBroker
 discord
-AerialTool_Threads
 
 [spotify]
 module=libcef.dll, -1
 module=spotify.exe, -1
 
 [discord]
-description=*ThreadPoolForegroundWorker*, -15
-description=*libuv-worker*, -15
-description=*MemoryInfra*, -15
-description=*CacheThread_BlockFile*, -15
-description=*BrokerEvent*, -15
-description=*LoaderLockSampler*, -15
-description=*CrashpadMainThread*, -15
-description=*ExitCodeWatcherThread*, -15
-description=*ThreadPoolSingleThreadCOMSTASharedForegroundBlocking4*, -15
-description=*ThreadPoolSingleThreadCOMSTASharedBackgroundBlocking0*, -15
-description=*ThreadPoolSingleThreadForegroundBlocking2*, -15
-description=*ThreadPoolSingleThreadSharedForeground3*, -15
-description=*ThreadPoolSingleThreadSharedBackgroundBlocking6*, -15
-description=*VideoCaptureThread*, -15
 description=*CrBrowserMain*, -1
-module=Discord.exe, -1, disableboost
-module=mswsock.dll, -15
+module=Discord.exe, -1
+module=mswsock.dll, -2
 module=nvwgf2umx.dll, -15
 module=discord_voice.node, -1
 module=discord_utils.node, -1
-module=discord_cloudsync.node, 300
-module=discord_dispatch.node, 300
-module=discord_game_utils.node, 300
+module=discord_cloudsync.node, -1
+module=discord_dispatch.node, -1
+module=discord_game_utils.node, -1
 module=discord_desktop_overlay.node, -15
 module=discord_krisp.node, -1
 module=updater.node, -15
-module=discord_media.node, 300
-module=MsSpellCheckingFacility.dll, 300
-module=wininet.dll, -15
+module=discord_media.node, -2
+module=wininet.dll, -2
 module=vk_swiftshader.dll, -15
 module=graphics-hook64.dll, -15
 module=libGLESv2.dll, -1
-module=nvoglv64.dll, 300
-module=combase.dll, -15
+module=nvoglv64.dll, -15
 
 [steam]
-module=InputHost.dll, 300
-module=steam.exe, -1
+module=InputHost.dll, -15
+module=steam.exe, -15
 module=steamservice.dll, -1
-module=steamclient.dll, 300
+module=steamclient.dll, -15
 module=ntdll.dll, -1
 module=tier0_s64.dll, 0
 
 [steamwebhelper]
-module=steamwebhelper.exe, -1
-module=libcef.dll, -1
-module=mswsock.dll, 300
+module=steamwebhelper.exe, -15
+module=libcef.dll, -15
+module=mswsock.dll, -1
 module=msmpeg2vdec.dll, -15
 module=ntdll.dll, -15
-module=nvoglv64.dll, 300
+module=nvoglv64.dll, -15
 
-[nvcontainer]
-module=nvcontainer.exe, 300
-module=NvPluginWatchdog.dll, 300
-module=NvTelemetry64.dll, 300
-module=NvXDCore.dll, 300
-module=_nvspserviceplugin64.dll, 300
-module=NvTelemetryAPI64.dll, 300
-module=NvUI.dll, 300
-module=nvxdapix.dll, 300
-module=mswsock.dll, 200
-module=nvapi64.dll, 200
-module=nvxdsyncplugin.dll, 300
-module=ipccommon64.dll, 300
-module=nvxdsyncplugin.dll, 300
-module=combase.dll, -15
-module=NvMessageBus.dll, -15
-module=NvMessageBusBroadcast.dll, -15
-module=ucrtbase.dll, -15
-module=NvBackend64.dll, -15
-module=ntdll.dll, -15
-
-[NVDisplay.Container]
-module=combase.dll, -15
-module=nvapi64.dll, 300
-module=NvTelemetryAPI64.dll, 300
-module=NVDisplay.Container.exe, -15
-module=NvcDispWatchdog.dll, 300
-module=nvxdsyncplugin.dll, 300
-module=wksServicePlugin.dll, 300
-module=_NvGSTPlugin.dll, 300
-module=_nvtopps.dll, 300
-module=NvXDCore.dll, 300
-module=NvMessageBus.dll, 300
-module=_NvMsgBusBroadcast.dll, 300
-module=_dbgeng.dll, 300
-module=dbgeng.dll, 300
-module=nvxdapix.dll, 300
-module=DispBroker.dll, 300
-module=nvui.dll, 300
-module=nvsvc64.dll, 300
-module=nvprofileupdaterplugin.dll, 300
-module=_DisplayDriverRAS.dll, 300
-module=ntdll.dll, -15
-
-; 4.0.4: every DWM thread stays at Idle (owner decision); boost back on - composition and input wake on events.
 [dwm]
-description=*DWM Kernel Sensor*, -15
-description=*DWM Master Input*, -15
-description=*DWM Token Thread*, -15
-description=*DWM LPC Port Thread*, -15
-description=*DWM Compositor Thread*, -15
-description=*DWM Manipulation Thread*, -15
+description=*DWM Kernel Sensor*, -1
+description=*DWM Master Input*, -1
 module=nvwgf2umx.dll, -15, tid=last
-module=dwmcore.dll, -15
-module=GameInput.dll, 200
+module=dwmcore.dll, -1
+module=GameInput.dll, -2
 module=ntdll.dll, -15
 module=ISM.dll, -15
-module=Windows.Gaming.Input.dll, 300
-module=dwmredir.dll, -15
-module=DispBroker.dll, -15
+module=Windows.Gaming.Input.dll, -1
+module=dwmredir.dll, -2
+module=DispBroker.dll, -2
 module=uDWM.dll, -15
 
 [searchapp]
 module=edgehtml.dll, -15
 module=Windows.UI.Xaml.dll, -1
 module=nvwgf2umx.dll, -15
-module=msvcrt.dll, -15
 
 [winlogon]
 module=winlogon.exe, -15
 module=ntdll.dll, -15
 
 [audiodg]
-module=audiodg.exe, -1, tid=0
-module=RltkAPOU64.dll, -1
-module=combase.dll, -15
+module=audiodg.exe,  tid=0
 
 [svchost]
 module=qwave.dll, 0
-module=sechost.dll, -15
-module=CoreMessaging.dll, 0
-module=ntdll.dll, -15
 module=svchost.exe, -15
-module=wevtsvc.dll, -15
-module=winmm.dll, 0
 module=sysmain.dll, 0
-module=PsmServiceExtHost.dll, -15
-module=esent.dll, -15
+module=PsmServiceExtHost.dll, -1
+module=esent.dll, -1
 
 [sihost]
-module=ActivationManager.dll, -15, disableboost
-module=combase.dll, -15, disableboost
-module=modernexecserver.dll, -15, disableboost
-module=sihost.exe, -15, disableboost
+module=ActivationManager.dll, -1, disableboost
+module=combase.dll, -1, disableboost
+module=modernexecserver.dll, -1, disableboost
+module=sihost.exe, -1, disableboost
 
 [taskhostw]
 module=winmm.dll, -15
 module=taskhostw.exe, -15
 
-; 4.0.4: Idle as before, boost back on (input / console).
-[csrss]
-module=winsrvext*, -15
-module=csrsrv*, -15
-module=cdd.dll, -15
-
 [dllhost]
 module=esent.dll, -15
 
 [startmenuexperiencehost]
-module=Windows.UI.Xaml.dll, 0
+module=Windows.UI.Xaml.dll, -1
 
 [shellexperiencehost]
-module=Windows.UI.Xaml.dll, 0
+module=Windows.UI.Xaml.dll, -1
 
-; 4.0.4: every thread at Idle (owner decision) - XAML and direct manipulation too; the catch-all last line takes the rest.
 [textinputhost]
-module=Windows.UI.Xaml.dll, -15
-module=directmanipulation.dll, -15
-module=TextInputHost.exe, -15
-module=SHCore.dll, -15
+module=Windows.UI.Xaml.dll, -1
+module=directmanipulation.dll, -1
+module=TextInputHost.exe, -1
+module=SHCore.dll, -1
 module=nvwgf2umx.dll, -15
-module=MrmCoreR.dll, -15
-module=*, -15
+module=MrmCoreR.dll, -1
 
 [conhost]
 module=conhost.exe, -15
 
 [explorer]
-module=Windows.Gaming.Input.dll, 300
-module=Windows.UI.Xaml.dll, -15, disableboost
-module=windows.immersiveshell.serviceprovider.dll, -15, disableboost
-module=dwmcorei.dll, -1, disableboost
-module=CoreMessagingXP.dll, -15
+module=Windows.Gaming.Input.dll, -1
+module=Windows.UI.Xaml.dll, -2, disableboost
+module=windows.immersiveshell.serviceprovider.dll, -1, disableboost
+module=dwmcorei.dll, 0, disableboost
+module=CoreMessagingXP.dll, 0
 module=nvwgf2umx.dll, -15
-module=SHCore*, -15, disableboost
+module=SHCore, -1, disableboost
 module=ntdll.dll, -1, disableboost
-module=sppc.dll, 300
-module=dxgi.dll, -15
-module=wlidprov.dll, -15
-module=CoreMessaging.dll, -15
-module=GdiPlus.dll, -15
-module=SndVolSSO.dll, -15
-module=MsSpellCheckingFacility.dll, 300
-module=twinui.pcshell.dll, -15
-module=InputHost.dll, 300
+module=sppc.dll, -2
+module=dxgi.dll, -1
+module=wlidprov.dll, -1
+module=CoreMessaging.dll, -1
+module=GdiPlus.dll, -2
+module=SndVolSSO.dll, -2
+module=twinui.pcshell.dll, -1
+module=InputHost.dll, -15
 
-; 4.0.4: every thread at Idle (owner decision), boost back on (text input wakes on keystrokes); the catch-all
-; last line takes the threads no line above names.
 [ctfmon]
-module=ctfmon.exe, -15
+module=ctfmon.exe, -1
 module=InputHost.dll, -15
 module=InputService.dll, -15
-module=msctf.dll, -15
-module=combase.dll, -15
-module=MTFServer.dll, -15
+module=msctf.dll, -1
+module=combase.dll, -1
+module=MTFServer.dll, -1
 module=ntdll.dll, -15
-module=MsCtfMonitor.dll, 300
-module=*, -15
+module=MsCtfMonitor.dll, -15
 
 [ayugram]
 module=ayugram.exe, -1
 module=winmm.dll, 0
 module=nvwgf2umx.dll, -15
-module=mswsock.dll, -15
-module=MsSpellCheckingFacility.dll, 300
-module=wininet.dll, -15
+module=mswsock.dll, -1
+module=wininet.dll, -1
 module=directmanipulation.dll, -1
-module=GdiPlus.dll, -15
-
-[lightshot]
-module=SHCore.dll, 300
-module=combase.dll, 300
-module=wininet.dll, 300
-module=GdiPlus.dll, 300
-module=crypt32.dll, 300
-module=Lightshot.exe, -15
-module=ntdll.dll, -15
+module=GdiPlus.dll, -2
 
 [winws]
 module=winws.exe, -15
-module=cygwin1.dll, -1
-module=sechost.dll, -15
+module=cygwin1.dll, -2
+module=sechost.dll, -2
 module=ntdll.dll, -15
 
-[warp-svc]
-module=mswsock.dll, -1
-module=warp-svc.exe, -15
-module=combase.dll, -15
-module=sechost.dll, -15
-
-[Cloudflare WARP]
-module=warp_ipc.dll, -15
-module=GdiPlus.dll, -15
-module=nvd3dumx.dll, 300
-
-[aerialtool_threads]
-module=AerialTool_Threads.exe, -15
+[grobyq]
+module=grobyq.exe, -15, disableboost
 module=ntdll.dll, -15
+module=coreclr.dll, -2
+module=wpfgfx_cor3.dll, -15
 module=combase.dll, -15
 module=GdiPlus.dll, -15
 module=SHCore.dll, -15
+module=nvd3dumx.dll, -15

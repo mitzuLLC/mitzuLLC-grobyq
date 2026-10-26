@@ -5,68 +5,80 @@ using System.Linq;
 
 namespace Grobyq
 {
-    // Import thread-PRIORITY presets from an AerialTool_Threads .ini file into grobyq's
-    // existing rule model. This sets the Windows thread priority level of matching threads
-    // and nothing else: there is no thread-suspend / thread-terminate path anywhere here.
-    // The two legacy non-priority source codes (200, 300) are NOT suspend/terminate codes -
-    // they simply clamp to the lowest priority ("Idle") per MapPrio, and [PROCESSESTOSUSPEND]
-    // is treated as a background-deprioritization list (Idle), never as suspension.
+    // The built-in system thread profile: Assets/system-threads.txt (embedded as "system-threads.txt"), grobyq's own
+    // profile 5.0.0 in the AerialTool_Threads .ini format. The system threads optimizer applies it while a chosen game
+    // runs, as written, and restores every thread when the game closes.
+    //
+    //   [SETTINGS]      ignored (the engine has its own catch-up period)
+    //   [DISABLEBOOST]  bare process names: process priority boost off (SetProcessPriorityBoost), for the whole process
+    //   [process]       one section per process name (-> "<name>.exe"); rule lines, first match wins per thread:
+    //                     module=<file or glob>, <priority>[, disableboost][, tid=first|last|N]
+    //                     description=<glob>, <priority>[, disableboost][, tid=...]
+    //                   priority: -15 Idle · -2 Lowest · -1 Below normal · 0 Normal · 1 Above normal · 2 Highest
+    //                   module = the file the thread starts in; a pattern without an extension ("SHCore") also matches
+    //                   the file ("SHCore.dll") - Engine.RuleHits. disableboost alone (no priority) = boost off, priority kept.
+    //
+    // 5.0.0 (grobyq 4.1.0): the profile sets THREAD priorities and boost, nothing else - no process class, no suspend, no
+    // terminate; the old profile and its paths are gone. What the format still allows but grobyq does not do:
+    //   - the codes 300 / 200 (the source tool's suspend / terminate) and any other number that is not a priority: the
+    //     line is skipped and reported, never mapped to a priority;
+    //   - [PROCESSESTOSUSPEND] / [SETPROCESSESTOIDLEPRIORITY] (a process class) and [GAMES]: recognised so they never
+    //     become process sections, and ignored - the games are chosen on Threads.
+    // Anti-cheat processes and modules are refused everywhere (Engine.ANTICHEAT); protected Windows processes apply only
+    // after the one-time confirmation (Engine.Gate).
     public static class ThreadIni
     {
-        // Section names that are global (not a process). A [Section] whose name is not one of
-        // these is a process section -> a Preset keyed by "<name>.exe".
-        private static readonly HashSet<string> GlobalSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { "SETTINGS", "GAMES", "PROCESSESTOSUSPEND", "SETPROCESSESTOIDLEPRIORITY", "DISABLEBOOST" };
+        // Sections that are not a process. SETTINGS is silent; the other three are legacy lists, reported and ignored.
+        private static readonly HashSet<string> IgnoredSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "SETTINGS", "GAMES", "PROCESSESTOSUSPEND", "SETPROCESSESTOIDLEPRIORITY" };
+        private const string BoostSection = "DISABLEBOOST";
 
-        // Never create thread rules for these (protected security / anti-cheat components).
-        // Matched case-insensitively against BOTH a process-section name and each
-        // module=/description= pattern, after stripping .exe/.dll and wildcards.
-        // Unconditional: there is no toggle.
-        // One list for the whole app: the engine refuses the same names on every apply path (Engine.ANTICHEAT).
+        // Never create thread rules for these (anti-cheat components), whatever the section or pattern says.
         public static readonly HashSet<string> Excluded = Engine.ANTICHEAT;
 
-        // One preview / log line: what the importer decided for a single source entry.
+        // One preview / log line: what the parser decided for a single source entry.
         public sealed class PreviewRow
         {
             public string Process = "";
-            public string Match = "";        // "desc" | "module" | "" (process-level / list entry)
+            public string Match = "";        // "desc" | "module" | "" (process-level entry)
             public string Pattern = "";
             public string SourceValue = "";
             public string Mapped = "";
             public bool Skipped;
-            public bool AntiCheat;           // skipped because it is an anti-cheat process / module (shown grey)
-            public bool Protected;           // a protected system process: applies only with the Advanced gate (amber)
+            public bool AntiCheat;           // skipped because it is an anti-cheat process / module
+            public bool Protected;           // a protected Windows process: applies only after the one-time confirmation
             public string Note = "";
         }
 
         public sealed class Result
         {
             public Dictionary<string, Preset> Presets = new Dictionary<string, Preset>(StringComparer.OrdinalIgnoreCase);
-            public Dictionary<string, string> BgClasses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            public List<string> Games = new List<string>();
             public List<PreviewRow> Rows = new List<PreviewRow>();
-            public bool HadSuspendCodes;     // the file had 300 / 200 entries: imported as Idle (-15), never suspend / terminate
+            // Lines the profile holds but grobyq does not act on (legacy lists, values that are not a priority, empty
+            // rules), one message each: the journal shows them when the optimizer is switched on.
+            public List<string> Ignored = new List<string>();
+
+            public int Rules { get { return Rows.Count(x => !x.Skipped && (x.Match == "desc" || x.Match == "module")); } }
+            public int BoostOff { get { return Presets.Values.Count(p => string.Equals(p.Boost, "Off", StringComparison.OrdinalIgnoreCase)); } }
         }
 
-        // source value -> grobyq Prio. 15/2 -> Highest ; 300/200/-15 -> Idle ; else Normal.
-        // 15 -> Highest: an imported profile never raises a thread to Time critical (that is a choice made on Threads).
+        // Source value -> grobyq Prio. "" = not a thread priority (the line is skipped): that covers the legacy codes
+        // 300 / 200 and the source tool's 15 (its "time critical") - the system profile lowers, it never pushes a system
+        // thread above Highest.
         public static string MapPrio(string value)
         {
             int v;
             if (!int.TryParse((value ?? "").Trim(), NumberStyles.Integer | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out v))
-                return "Normal";
+                return "";
             switch (v)
             {
-                case 15: return "Highest";
                 case 2: return "Highest";
                 case 1: return "AboveNormal";
                 case 0: return "Normal";
                 case -1: return "BelowNormal";
                 case -2: return "Lowest";
                 case -15: return "Idle";
-                case 300: return "Idle";   // legacy non-priority code -> clamp to lowest
-                case 200: return "Idle";   // legacy non-priority code -> clamp to lowest
-                default: return "Normal";
+                default: return "";
             }
         }
 
@@ -96,15 +108,15 @@ namespace Grobyq
             if (string.IsNullOrEmpty(iniText)) return r;
 
             string section = "";        // current section name ("" = none / preamble)
-            string procKey = "";        // exe key of the current process section ("" = global or skipped)
+            string procKey = "";        // exe key of the current process section ("" = not a process section)
             bool sectionSkipped = false;
 
             foreach (var raw in iniText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
             {
                 string line = raw.Trim();
                 if (line.Length == 0 || line[0] == ';' || line[0] == '#') continue;
-                // inline comment: " ;..." after the content ("[dota2] ; note", "module=a.dll, -2 ; why"). Only ';' - a
-                // thread description can contain " #" ("Worker #3"); '#' starts a comment only at the line start.
+                // inline comment: " ;..." after the content ("module=a.dll, -2 ; why"). Only ';' - a thread description can
+                // contain " #" ("Worker #3"); '#' starts a comment only at the line start.
                 int cm = -1;
                 for (int ci = 1; ci < line.Length; ci++) if (line[ci] == ';' && char.IsWhiteSpace(line[ci - 1])) { cm = ci; break; }
                 if (cm > 0) line = line.Substring(0, cm).TrimEnd();
@@ -115,28 +127,36 @@ namespace Grobyq
                     section = line.Substring(1, line.Length - 2).Trim();
                     procKey = "";
                     sectionSkipped = false;
-                    if (!GlobalSections.Contains(section))
+                    if (IgnoredSections.Contains(section) || section.Equals(BoostSection, StringComparison.OrdinalIgnoreCase)) continue;
+                    // process section
+                    if (IsExcluded(section))
                     {
-                        // process section
-                        if (IsExcluded(section))
-                        {
-                            sectionSkipped = true;
-                            r.Rows.Add(new PreviewRow { Process = ExeKey(section), Skipped = true, AntiCheat = true, Note = "skipped: anti-cheat" });
-                        }
-                        else
-                        {
-                            procKey = ExeKey(section);
-                            if (!r.Presets.ContainsKey(procKey)) r.Presets[procKey] = new Preset { Exe = procKey };
-                        }
+                        sectionSkipped = true;
+                        r.Rows.Add(new PreviewRow { Process = ExeKey(section), Skipped = true, AntiCheat = true, Note = "skipped: anti-cheat" });
+                    }
+                    else
+                    {
+                        procKey = ExeKey(section);
+                        if (!r.Presets.ContainsKey(procKey)) r.Presets[procKey] = new Preset { Exe = procKey };
                     }
                     continue;
                 }
 
-                // ---- global section list entries (bare process names) ----
-                if (GlobalSections.Contains(section))
+                // ---- legacy lists: reported once per entry, nothing applied ----
+                if (IgnoredSections.Contains(section))
                 {
-                    if (section.Equals("SETTINGS", StringComparison.OrdinalIgnoreCase)) continue;   // ignored
+                    if (section.Equals("SETTINGS", StringComparison.OrdinalIgnoreCase)) continue;   // the engine has its own period
+                    string name = line.Split('=')[0].Trim();
+                    if (name.Length == 0) continue;
+                    r.Ignored.Add("[" + section + "] " + name + ": legacy list ignored - the system profile sets thread priorities only" +
+                                  (section.Equals("GAMES", StringComparison.OrdinalIgnoreCase) ? " (the games are chosen on Threads)" : " (no process class)"));
+                    r.Rows.Add(new PreviewRow { Process = ExeKey(name), Skipped = true, Note = "legacy list ignored (" + section + ")" });
+                    continue;
+                }
 
+                // ---- [DISABLEBOOST]: bare process names -> process priority boost off ----
+                if (section.Equals(BoostSection, StringComparison.OrdinalIgnoreCase))
+                {
                     string name = line.Split('=')[0].Trim();   // tolerate "name" or "name=..."
                     if (name.Length == 0) continue;
                     if (IsExcluded(name))
@@ -144,35 +164,17 @@ namespace Grobyq
                         r.Rows.Add(new PreviewRow { Process = ExeKey(name), Skipped = true, AntiCheat = true, Note = "skipped: anti-cheat (" + section + ")" });
                         continue;
                     }
-
-                    if (section.Equals("GAMES", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string g = ExeKey(name);                  // the watch list, presets and rules all key on "<name>.exe"
-                        if (!r.Games.Any(x => string.Equals(x, g, StringComparison.OrdinalIgnoreCase))) r.Games.Add(g);
-                        r.Rows.Add(new PreviewRow { Process = g, Note = "watch-list suggestion (GAMES)" });
-                    }
-                    else if (section.Equals("DISABLEBOOST", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string key = ExeKey(name);
-                        Preset p;
-                        if (!r.Presets.TryGetValue(key, out p)) { p = new Preset { Exe = key }; r.Presets[key] = p; }
-                        p.Boost = "Off";
-                        r.Rows.Add(new PreviewRow { Process = key, Mapped = "boost Off", Protected = Engine.IsProtected(key), Note = "process priority boost off (DISABLEBOOST)" });
-                    }
-                    else   // SETPROCESSESTOIDLEPRIORITY or PROCESSESTOSUSPEND -> background Idle (never suspended)
-                    {
-                        string key = ExeKey(name);
-                        bool prot = Engine.IsProtected(key);
-                        r.Rows.Add(new PreviewRow { Process = key, Mapped = prot ? "" : "Idle", Skipped = prot, Protected = prot,
-                            Note = prot ? "protected system process: never lowered as background" : "background Idle (" + section + (section.Equals("PROCESSESTOSUSPEND", StringComparison.OrdinalIgnoreCase) ? " -> Idle, never suspended" : "") + ")" });
-                        if (!prot) r.BgClasses[key] = "Idle";
-                    }
+                    string key = ExeKey(name);
+                    Preset p;
+                    if (!r.Presets.TryGetValue(key, out p)) { p = new Preset { Exe = key }; r.Presets[key] = p; }
+                    p.Boost = "Off";
+                    r.Rows.Add(new PreviewRow { Process = key, Mapped = "boost Off", Protected = Engine.IsProtected(key), Note = "process priority boost off (DISABLEBOOST)" });
                     continue;
                 }
 
-                // ---- inside a process section: module=/description= rule lines ----
+                // ---- inside a process section: module= / description= rule lines ----
                 if (sectionSkipped) continue;           // whole section was excluded
-                if (procKey.Length == 0) continue;      // not in a process section (preamble / unknown)
+                if (procKey.Length == 0) continue;      // preamble / unknown section
 
                 int eq = line.IndexOf('=');
                 if (eq <= 0) continue;
@@ -188,10 +190,15 @@ namespace Grobyq
                 if (pattern.Length == 0) continue;
                 // the priority is the first numeric field; flags (disableboost, tid=) may stand anywhere after the pattern
                 string value = "";
+                bool boostOff = false; string tid = "";
                 for (int i = 1; i < parts.Length; i++)
                 {
-                    int dummy; string f = parts[i].Trim();
-                    if (int.TryParse(f, System.Globalization.NumberStyles.Integer | System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out dummy)) { value = f; break; }
+                    string f = parts[i].Trim();
+                    if (f.Length == 0) continue;
+                    int dummy;
+                    if (value.Length == 0 && int.TryParse(f, NumberStyles.Integer | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out dummy)) value = f;
+                    else if (f.Equals("disableboost", StringComparison.OrdinalIgnoreCase)) boostOff = true;
+                    else if (f.StartsWith("tid=", StringComparison.OrdinalIgnoreCase)) tid = f.Substring(4).Trim();   // tid=last|first|0|<N> -> ThreadRule.Tid ordinal
                 }
 
                 if (IsExcluded(pattern))
@@ -200,38 +207,41 @@ namespace Grobyq
                     continue;
                 }
 
-                bool boostOff = false; string tid = "";
-                for (int i = 1; i < parts.Length; i++)
+                string prio = value.Length == 0 ? "" : MapPrio(value);
+                if (value.Length > 0 && prio.Length == 0)
                 {
-                    string flag = parts[i].Trim();
-                    if (flag.Length == 0) continue;
-                    if (flag.Equals("disableboost", StringComparison.OrdinalIgnoreCase)) boostOff = true;
-                    else if (flag.StartsWith("tid=", StringComparison.OrdinalIgnoreCase)) tid = flag.Substring(4).Trim();   // tid=last|first|0|<N> -> ThreadRule.Tid ordinal
+                    // 300 / 200 / 15 / anything else: not a thread priority. Never mapped - skipped and reported.
+                    string why = value == "300" ? "300 = suspend in the source tool" : value == "200" ? "200 = terminate in the source tool" : value + " is not a thread priority";
+                    r.Ignored.Add("[" + procKey + "] " + kind + "=" + pattern + ", " + value + ": " + why + " - grobyq sets priorities only, line skipped");
+                    r.Rows.Add(new PreviewRow { Process = procKey, Match = match, Pattern = pattern, SourceValue = value, Skipped = true, Note = "not a priority (" + value + "): skipped" });
+                    continue;
+                }
+                if (prio.Length == 0 && !boostOff)
+                {
+                    // flags only, and none that sets anything ("module=x.exe, tid=0"): nothing to do
+                    r.Ignored.Add("[" + procKey + "] " + kind + "=" + pattern + ": no priority and no disableboost - nothing to set, line skipped");
+                    r.Rows.Add(new PreviewRow { Process = procKey, Match = match, Pattern = pattern, Skipped = true, Note = "no priority, no boost flag: skipped" });
+                    continue;
                 }
 
-                string prio = value.Length == 0 ? "" : MapPrio(value);   // flags only = keep the priority, change the boost
-                string vt = value.Trim();
-                if (vt == "300" || vt == "200") r.HadSuspendCodes = true;
                 var rule = new ThreadRule { Match = match, Pattern = pattern, Prio = prio, Tid = tid };
                 if (boostOff) rule.Boost = "Off";
                 r.Presets[procKey].Threads.Add(rule);
 
                 var note = new List<string>();
+                if (prio.Length == 0) note.Add("priority kept");
                 if (boostOff) note.Add("boost off");
                 if (tid.Length > 0) note.Add("tid=" + tid);
-                if (vt == "300") note.Add("Suspend -> Idle");
-                if (vt == "200") note.Add("Terminate -> Idle");
                 bool protRow = Engine.IsProtected(procKey);
-                if (protRow) note.Add("requires Advanced");
+                if (protRow) note.Add("protected process: after the confirmation");
                 r.Rows.Add(new PreviewRow { Process = procKey, Match = match, Pattern = pattern, SourceValue = value, Mapped = prio, Protected = protRow, Note = string.Join(", ", note) });
             }
 
             return r;
         }
 
-        // ---------------- bundled profile (embedded resource "system-threads.txt") ----------------
-        // grobyq's built-in system thread-priority profile, parsed with the same priority-only rules as Parse():
-        // 300/200 -> Idle, anti-cheat entries dropped. Applied by the "System thread optimization" switch.
+        // ---------------- the bundled profile (embedded resource "system-threads.txt") ----------------
+        // Parsed with the rules above every time the system threads optimizer is switched on (Engine.LoadSystemProfile).
         public static Result LoadBundled()
         {
             try
@@ -243,64 +253,6 @@ namespace Grobyq
             }
             catch { }
             return new Result();
-        }
-
-        public const string SuspendNote = "Suspend/Terminate entries were imported as Idle (-15): grobyq tunes priority, it does not freeze or kill threads. Idle achieves the 'get it off the path' goal reversibly.";
-
-        // ---------------- apply (merges into the engine; mirrors Store.ImportProfile) ----------------
-        // replace = drop current presets / background classes first; otherwise same names are
-        // overwritten and the rest is kept. Returns log lines.
-        public static List<string> Apply(Result r, Engine eng, bool replace)
-        {
-            var log = new List<string>();
-            if (r == null) return log;
-
-            eng.UnderLock(() => {
-            if (replace) eng.Presets.Clear();
-            foreach (var p in r.Presets.Values) eng.Presets[p.Exe] = p;
-            int rules = r.Rows.Count(x => !x.Skipped && (x.Match == "desc" || x.Match == "module"));
-            log.Add(string.Format("[IM] .ini presets: {0} presets, {1} thread rules imported{2}", r.Presets.Count, rules, replace ? " (replaced)" : " (merged)"));
-
-            if (r.BgClasses.Count > 0)
-            {
-                // the background list is space separated: a name with a space ("Riot Client") cannot live in it
-                var spaced = r.BgClasses.Keys.Where(n => n.IndexOf(' ') >= 0).ToList();
-                foreach (var n in spaced) log.Add("[IM] background entry skipped (a space in the name cannot be stored in the list): " + n);
-                var names = r.BgClasses.Keys.Where(n => n.IndexOf(' ') < 0).ToList();
-
-                // Replace = the imported lists replace the current ones (list AND classes, so nothing keeps a list entry
-                // without its class); Merge = imported names are added, the rest is kept.
-                var set = replace ? new List<string>() : new List<string>(Settings.BgProcs());
-                if (replace) eng.BgClasses.Clear();
-                foreach (var n in names)
-                {
-                    eng.BgClasses[n] = r.BgClasses[n];
-                    if (!set.Any(x => string.Equals(x, n, StringComparison.OrdinalIgnoreCase))) set.Add(n);
-                }
-                Settings.Set("BgProcs", string.Join(" ", set));
-                log.Add(string.Format("[IM] background (Idle): {0}{1}", string.Join(" ", names), replace ? " (list replaced)" : ""));
-            }
-
-            foreach (var x in r.Rows.Where(x => x.AntiCheat))
-                log.Add("[THR] anti-cheat target skipped: " + (x.Pattern.Length > 0 ? x.Process + " / " + x.Pattern : x.Process));
-            int prot = r.Rows.Count(x => x.Protected && !x.Skipped);
-            if (prot > 0) log.Add(string.Format("[IM] {0} rule(s) target protected system processes: they apply only with 'Priority on protected processes (advanced)'", prot));
-            if (r.HadSuspendCodes) log.Add("[IM] " + SuspendNote);
-
-            if (r.Games.Count > 0)
-            {
-                // the watch list is space separated: a game name with a space cannot live in it
-                foreach (var g in r.Games.Where(g => g.IndexOf(' ') >= 0)) log.Add("[IM] game skipped (a space in the name cannot be stored in the watch list): " + g);
-                var games = r.Games.Where(g => g.IndexOf(' ') < 0).ToList();
-                if (replace && games.Count > 0) { Settings.Set("WatchList", string.Join(" ", games)); log.Add("[IM] watch list replaced: " + string.Join(" ", games)); }
-                else if (!replace) log.Add("[IM] games (not applied to watch list on merge): " + string.Join(" ", r.Games));
-                else log.Add("[IM] watch list kept: no importable game name");
-            }
-
-            string err = eng.SavePresets();   // SavePresets() invalidates the Lever-3 apply-once cache -> new rules re-apply next cycle
-            if (err.Length > 0) log.Add("[!!] could not save presets.json: " + err);
-            });
-            return log;
         }
     }
 }

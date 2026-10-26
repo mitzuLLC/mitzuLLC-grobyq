@@ -118,8 +118,8 @@ namespace Grobyq
 
         public static Dictionary<string, string> DefaultBg()
         {
-            // 4.0.2: the user background list is gone (owner decision). ctfmon.exe and
-            // TextInputHost.exe moved into the system threads optimizer (bundled profile, [SETPROCESSESTOIDLEPRIORITY]).
+            // 4.0.2: the user background list is gone (owner decision). ctfmon.exe and TextInputHost.exe are thread rules of
+            // the system profile (4.1.0 / profile 5.0.0: Below normal and Idle per thread, no process class).
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
